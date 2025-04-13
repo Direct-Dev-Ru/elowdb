@@ -6,33 +6,33 @@ import { temporaryFile } from 'tempy'
 import { JSONFile, JSONFileSync } from './JSONFile.js'
 
 type Data = {
-  a: number
+    a: number
 }
 
 await test('JSONFile', async () => {
-  const obj = { a: 1 }
-  const file = new JSONFile<Data>(temporaryFile())
+    const obj = { a: 1 }
+    const file = new JSONFile<Data>(temporaryFile())
 
-  // Null if file doesn't exist
-  equal(await file.read(), null)
+    // Null if file doesn't exist
+    equal(await file.read(), null)
 
-  // Write
-  equal(await file.write(obj), undefined)
+    // Write
+    equal(await file.write(obj), undefined)
 
-  // Read
-  deepEqual(await file.read(), obj)
+    // Read
+    deepEqual(await file.read(), obj)
 })
 
 await test('JSONFileSync', () => {
-  const obj = { a: 1 }
-  const file = new JSONFileSync<Data>(temporaryFile())
+    const obj = { a: 1 }
+    const file = new JSONFileSync<Data>(temporaryFile())
 
-  // Null if file doesn't exist
-  equal(file.read(), null)
+    // Null if file doesn't exist
+    equal(file.read(), null)
 
-  // Write
-  equal(file.write(obj), undefined)
+    // Write
+    equal(file.write(obj), undefined)
 
-  // Read
-  deepEqual(file.read(), obj)
+    // Read
+    deepEqual(file.read(), obj)
 })

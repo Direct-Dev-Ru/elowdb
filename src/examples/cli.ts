@@ -1,7 +1,7 @@
 import { JSONFileSyncPreset } from '../presets/node.js'
 
 type Data = {
-  messages: string[]
+    messages: string[]
 }
 
 const message = process.argv[2] || ''

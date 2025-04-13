@@ -4,31 +4,31 @@ import test from 'node:test'
 import { Memory, MemorySync } from './Memory.js'
 
 await test('Memory', async () => {
-  const obj = { a: 1 }
+    const obj = { a: 1 }
 
-  const memory = new Memory()
+    const memory = new Memory()
 
-  // Null by default
-  equal(await memory.read(), null)
+    // Null by default
+    equal(await memory.read(), null)
 
-  // Write
-  equal(await memory.write(obj), undefined)
+    // Write
+    equal(await memory.write(obj), undefined)
 
-  // Read
-  deepEqual(await memory.read(), obj)
+    // Read
+    deepEqual(await memory.read(), obj)
 })
 
 await test('MemorySync', () => {
-  const obj = { a: 1 }
+    const obj = { a: 1 }
 
-  const memory = new MemorySync()
+    const memory = new MemorySync()
 
-  // Null by default
-  equal(memory.read(), null)
+    // Null by default
+    equal(memory.read(), null)
 
-  // Write
-  equal(memory.write(obj), undefined)
+    // Write
+    equal(memory.write(obj), undefined)
 
-  // Read
-  deepEqual(memory.read(), obj)
+    // Read
+    deepEqual(memory.read(), obj)
 })

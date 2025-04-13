@@ -10,12 +10,12 @@ const app = express()
 app.use(express.json())
 
 type Post = {
-  id: string
-  body: string
+    id: string
+    body: string
 }
 
 type Data = {
-  posts: Post[]
+    posts: Post[]
 }
 
 const defaultData: Data = { posts: [] }
@@ -25,20 +25,20 @@ const db = await JSONFilePreset<Data>('db.json', defaultData)
 const { posts } = db.data
 
 app.get('/posts/:id', (req, res) => {
-  const post = posts.find((p) => p.id === req.params.id)
-  res.send(post)
+    const post = posts.find((p) => p.id === req.params.id)
+    res.send(post)
 })
 
 app.post(
-  '/posts',
-  asyncHandler(async (req, res) => {
-    const post = req.body as Post
-    post.id = String(posts.length + 1)
-    await db.update(({ posts }) => posts.push(post))
-    res.send(post)
-  }),
+    '/posts',
+    asyncHandler(async (req, res) => {
+        const post = req.body as Post
+        post.id = String(posts.length + 1)
+        await db.update(({ posts }) => posts.push(post))
+        res.send(post)
+    }),
 )
 
 app.listen(3000, () => {
-  console.log('listening on port 3000')
+    console.log('listening on port 3000')
 })

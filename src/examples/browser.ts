@@ -1,7 +1,7 @@
 import { LocalStoragePreset } from '../presets/browser.js'
 
 type Data = {
-  messages: string[]
+    messages: string[]
 }
 
 const defaultData: Data = { messages: [] }

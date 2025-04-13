@@ -1,7 +1,9 @@
-# lowdb [![](http://img.shields.io/npm/dm/lowdb.svg?style=flat)](https://www.npmjs.org/package/lowdb) [![Node.js CI](https://github.com/typicode/lowdb/actions/workflows/node.js.yml/badge.svg)](https://github.com/typicode/lowdb/actions/workflows/node.js.yml)
+# elowdb [![](http://img.shields.io/npm/dm/lowdb.svg?style=flat)](https://www.npmjs.org/package/lowdb) [![GitHub Link](https://github.com/typicode/elowdb/actions/workflows/node.js.yml/badge.svg)](https://github.com/direct-dev-ru/elowdb)
+
+# forked from lowdb [![link to repo](https://github.com/typicode/lowdb/actions/workflows/node.js.yml/badge.svg)](https://github.com/typicode/lowdb)
 
 > Simple to use type-safe local JSON database 🦉
-> 
+>
 > If you know JavaScript, you know how to use lowdb.
 
 Read or create `db.json`
@@ -63,15 +65,15 @@ It's that simple. `db.data` is just a JavaScript object, no magic.
 
 ## Features
 
-- **Lightweight**
-- **Minimalist**
-- **TypeScript**
-- **Plain JavaScript**
-- Safe atomic writes
-- Hackable:
-  - Change storage, file format (JSON, YAML, ...) or add encryption via [adapters](#adapters)
-  - Extend it with lodash, ramda, ... for super powers!
-- Automatically switches to fast in-memory mode during tests
+-   **Lightweight**
+-   **Minimalist**
+-   **TypeScript**
+-   **Plain JavaScript**
+-   Safe atomic writes
+-   Hackable:
+    -   Change storage, file format (JSON, YAML, ...) or add encryption via [adapters](#adapters)
+    -   Extend it with lodash, ramda, ... for super powers!
+-   Automatically switches to fast in-memory mode during tests
 
 ## Install
 
@@ -112,7 +114,7 @@ You can use TypeScript to check your data types.
 
 ```ts
 type Data = {
-  messages: string[]
+    messages: string[]
 }
 
 const defaultData: Data = { messages: [] }
@@ -132,21 +134,21 @@ import { JSONFile } from 'lowdb/node'
 import lodash from 'lodash'
 
 type Post = {
-  id: number
-  title: string
+    id: number
+    title: string
 }
 
 type Data = {
-  posts: Post[]
+    posts: Post[]
 }
 
 // Extend Low class with a new `chain` field
 class LowWithLodash<T> extends Low<T> {
-  chain: lodash.ExpChain<this['data']> = lodash.chain(this).get('data')
+    chain: lodash.ExpChain<this['data']> = lodash.chain(this).get('data')
 }
 
 const defaultData: Data = {
-  posts: [],
+    posts: [],
 }
 const adapter = new JSONFile<Data>('db.json', defaultData)
 
@@ -167,10 +169,10 @@ See [`src/examples/`](src/examples) directory.
 
 Lowdb provides four presets for common cases.
 
-- `JSONFilePreset(filename, defaultData)`
-- `JSONFileSyncPreset(filename, defaultData)`
-- `LocalStoragePreset(name, defaultData)`
-- `SessionStoragePreset(name, defaultData)`
+-   `JSONFilePreset(filename, defaultData)`
+-   `JSONFileSyncPreset(filename, defaultData)`
+-   `LocalStoragePreset(name, defaultData)`
+-   `SessionStoragePreset(name, defaultData)`
 
 See [`src/examples/`](src/examples) directory for usage.
 
@@ -233,8 +235,8 @@ Calls `fn()` then `db.write()`.
 
 ```js
 db.update((data) => {
-  // make changes to data
-  // ...
+    // make changes to data
+    // ...
 })
 // files.json will be updated
 ```
@@ -302,12 +304,16 @@ Adapters for easily supporting other data formats or adding behaviors (encrypt, 
 ```js
 import { DataFile } from 'lowdb/node'
 new DataFile(filename, {
-  parse: YAML.parse,
-  stringify: YAML.stringify
+    parse: YAML.parse,
+    stringify: YAML.stringify,
 })
 new DataFile(filename, {
-  parse: (data) => { decypt(JSON.parse(data)) },
-  stringify: (str) => { encrypt(JSON.stringify(str)) }
+    parse: (data) => {
+        decypt(JSON.parse(data))
+    },
+    stringify: (str) => {
+        encrypt(JSON.stringify(str))
+    },
 })
 ```
 
@@ -323,21 +329,21 @@ An adapter is a simple class that just needs to expose two methods:
 
 ```js
 class AsyncAdapter {
-  read() {
-    /* ... */
-  } // should return Promise<data>
-  write(data) {
-    /* ... */
-  } // should return Promise<void>
+    read() {
+        /* ... */
+    } // should return Promise<data>
+    write(data) {
+        /* ... */
+    } // should return Promise<void>
 }
 
 class SyncAdapter {
-  read() {
-    /* ... */
-  } // should return data
-  write(data) {
-    /* ... */
-  } // should return nothing
+    read() {
+        /* ... */
+    } // should return data
+    write(data) {
+        /* ... */
+    } // should return nothing
 }
 ```
 
@@ -348,19 +354,19 @@ import { Low } from 'lowdb'
 import { api } from './AsyncStorage'
 
 class CustomAsyncAdapter {
-  // Optional: your adapter can take arguments
-  constructor(args) {
-    // ...
-  }
+    // Optional: your adapter can take arguments
+    constructor(args) {
+        // ...
+    }
 
-  async read() {
-    const data = await api.read()
-    return data
-  }
+    async read() {
+        const data = await api.read()
+        return data
+    }
 
-  async write(data) {
-    await api.write(data)
-  }
+    async write(data) {
+        await api.write(data)
+    }
 }
 
 const adapter = new CustomAsyncAdapter()
@@ -381,22 +387,22 @@ import { TextFile } from 'lowdb/node'
 import YAML from 'yaml'
 
 class YAMLFile {
-  constructor(filename) {
-    this.adapter = new TextFile(filename)
-  }
-
-  async read() {
-    const data = await this.adapter.read()
-    if (data === null) {
-      return null
-    } else {
-      return YAML.parse(data)
+    constructor(filename) {
+        this.adapter = new TextFile(filename)
     }
-  }
 
-  write(obj) {
-    return this.adapter.write(YAML.stringify(obj))
-  }
+    async read() {
+        const data = await this.adapter.read()
+        if (data === null) {
+            return null
+        } else {
+            return YAML.parse(data)
+        }
+    }
+
+    write(obj) {
+        return this.adapter.write(YAML.stringify(obj))
+    }
 }
 
 const adapter = new YAMLFile('file.yaml')

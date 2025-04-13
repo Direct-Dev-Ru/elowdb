@@ -4,20 +4,20 @@ import { LowSync, MemorySync, SyncAdapter } from '../index.js'
 import { JSONFileSync } from '../node.js'
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace NodeJS {
-    interface ProcessEnv {
-      NODE_ENV: 'test' | 'dev' | 'prod'
+    // eslint-disable-next-line @typescript-eslint/no-namespace
+    namespace NodeJS {
+        interface ProcessEnv {
+            NODE_ENV: 'test' | 'dev' | 'prod'
+        }
     }
-  }
 }
 
 type Data = Record<string, unknown>
 const defaultData: Data = {}
 const adapter: SyncAdapter<Data> =
-  process.env.NODE_ENV === 'test'
-    ? new MemorySync<Data>()
-    : new JSONFileSync<Data>('db.json')
+    process.env.NODE_ENV === 'test'
+        ? new MemorySync<Data>()
+        : new JSONFileSync<Data>('db.json')
 
 const db = new LowSync<Data>(adapter, defaultData)
 db.read()
