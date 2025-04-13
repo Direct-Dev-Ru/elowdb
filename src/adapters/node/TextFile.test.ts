@@ -5,9 +5,11 @@ import { temporaryFile } from 'tempy'
 
 import { TextFile, TextFileSync } from './TextFile.js'
 
+const secretKey = 'somesecretcode'
+
 await test('TextFile', async () => {
     const str = 'foo'
-    const file = new TextFile(temporaryFile())
+    const file = new TextFile(temporaryFile(), secretKey)
 
     // Null if file doesn't exist
     equal(await file.read(), null)
@@ -21,7 +23,7 @@ await test('TextFile', async () => {
 
 await test('TextFileSync', () => {
     const str = 'foo'
-    const file = new TextFileSync(temporaryFile())
+    const file = new TextFileSync(temporaryFile(), secretKey)
 
     // Null if file doesn't exist
     equal(file.read(), null)
@@ -34,7 +36,8 @@ await test('TextFileSync', () => {
 })
 
 await test('RaceCondition', async () => {
-    const file = new TextFile(temporaryFile())
+    const tempFile = temporaryFile()
+    const file = new TextFile(tempFile, secretKey)
     const promises: Promise<void>[] = []
 
     let i = 0
@@ -45,4 +48,5 @@ await test('RaceCondition', async () => {
     await Promise.all(promises)
 
     equal(await file.read(), String(i - 1))
+    console.log(tempFile)
 })

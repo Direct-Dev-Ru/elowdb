@@ -10,6 +10,7 @@ export class DataFile<T> implements Adapter<T> {
 
     constructor(
         filename: PathLike,
+        _cypherKey: string | undefined = undefined,
         {
             parse,
             stringify,
@@ -18,9 +19,10 @@ export class DataFile<T> implements Adapter<T> {
             stringify: (data: T) => string
         },
     ) {
-        this.#adapter = new TextFile(filename)
+        this.#adapter = new TextFile(filename, _cypherKey)
         this.#parse = parse
         this.#stringify = stringify
+        this.#adapter._cypherKey = _cypherKey
     }
 
     async read(): Promise<T | null> {
@@ -44,6 +46,7 @@ export class DataFileSync<T> implements SyncAdapter<T> {
 
     constructor(
         filename: PathLike,
+        _cypherKey: string = '',
         {
             parse,
             stringify,
@@ -52,7 +55,7 @@ export class DataFileSync<T> implements SyncAdapter<T> {
             stringify: (data: T) => string
         },
     ) {
-        this.#adapter = new TextFileSync(filename)
+        this.#adapter = new TextFileSync(filename, _cypherKey)
         this.#parse = parse
         this.#stringify = stringify
     }

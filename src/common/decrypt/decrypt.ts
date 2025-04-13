@@ -6,7 +6,7 @@
 import * as crypto from 'node:crypto'
 
 // Function to decrypt the Ansible Vault encrypted data
-export function decrypt(data: string, password: string) {
+export function decryptString(data: string, password: string) {
     data = replaceCarriageReturn(data)
     const body = splitHeader(data)
     const { salt, cryptedHmac, ciphertext } = decodeData(body)
@@ -35,7 +35,7 @@ function splitHeader(data: string) {
     const header = lines[0]?.split(';') || ''
     const cipherName = header[2]?.trim()
     if (cipherName !== 'AES256') {
-        throw new Error('unsupported cipher: ' + cipherName)
+        throw new Error('unsupported cypher: ' + cipherName)
     }
     return lines.slice(1).join('')
 }
