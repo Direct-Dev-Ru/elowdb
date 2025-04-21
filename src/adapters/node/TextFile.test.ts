@@ -48,5 +48,5 @@ await test('RaceCondition', async () => {
     await Promise.all(promises)
 
     equal(await file.read(), String(i - 1))
-    console.log(tempFile)
+    // console.log(tempFile)
 })

@@ -22,7 +22,7 @@ await test('JSONFile', async () => {
 
     // Write
     equal(await file.write(obj), undefined)
-    console.log('tempFile:', tempFile)
+    // console.log('tempFile:', tempFile)
 
     // Read
     deepEqual(await file.read(), obj)
@@ -32,7 +32,7 @@ await test('JSONFileSync', () => {
     const tempFile = temporaryFile()
     const obj = { a: 1 }
     const file = new JSONFileSync<Data>(tempFile, secretKey)
-    console.log('tempFile:', tempFile)
+    // console.log('tempFile:', tempFile)
     // Null if file doesn't exist
     equal(file.read(), null)
 

@@ -1,16 +1,22 @@
 export interface Adapter<T> {
     read: () => Promise<T | null>
     write: (data: T) => Promise<void>
-    decrypt?: () => Promise<boolean | { error: string }>
+    decrypt?: (encryptedText: string) => Promise<string | { error: string }>
     encrypt?: (
-        secretkey: string | undefined,
-    ) => Promise<boolean | { error: string }>
-    _cypherKey?: string
+        secretkey: string,
+    ) => Promise<string | { error: string }>
+    // _cypherKey?: string
 }
 
 export interface SyncAdapter<T> {
     read: () => T | null
     write: (data: T) => void
+    decrypt?: (encryptedText: string) => string | { error: string }
+    encrypt?: (
+        secretkey: string,
+        text: string,
+    ) => string | { error: string }
+    // _cypherKey?: string
 }
 
 function checkArgs(adapter: unknown, defaultData: unknown) {
