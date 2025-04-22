@@ -50,7 +50,12 @@
         "!lib/**/*.test.*"
     ],
     "scripts": {
-        "test": "node --import tsx/esm --test src/**/*.test.ts src/**/**/*.test.ts",
+        "test:native:node": "node --import tsx/esm --test-name-pattern='.*' --test-pattern='.*'",
+        "test:vitest:browser": "vitest --config vitest.config.browser.ts",        
+        "test:vitest:node": "vitest --config vitest.config.node.ts",        
+        "test:vitest": "npm run test:vitest:browser && npm run test:vitest:node",
+        "test": "npm run test:native:node && npm run test:vitest",
+        "test:coverage": "vitest run --coverage",
         "lint": "eslint src --ext .ts --ignore-path .gitignore",
         "build": "del-cli lib && tsc",
         "prepublishOnly": "npm run build",
@@ -64,20 +69,26 @@
         "@commitlint/cli": "^18.4.3",
         "@commitlint/config-conventional": "^18.4.3",
         "@commitlint/prompt-cli": "^18.4.3",
+        "@peculiar/webcrypto": "^1.4.1",
         "@sindresorhus/tsconfig": "^5.0.0",
         "@types/express": "^4.17.21",
         "@types/lodash": "^4.14.202",
         "@types/node": "^20.10.5",
         "@typicode/eslint-config": "^1.2.0",
+        "@vitest/browser": "^1.6.1",
+        "@vitest/coverage-v8": "^1.2.2",
         "del-cli": "^5.1.0",
         "eslint": "^8.56.0",
         "express-async-handler": "^1.2.0",
         "husky": "^8.0.3",
         "lodash": "^4.17.21",
+        "playwright": "^1.52.0",
         "tempy": "^3.1.0",
         "ts-node": "^10.9.2",
         "tsx": "^4.7.0",
-        "typescript": "^5.1.0"
+        "typescript": "^5.1.0",
+        "vite-tsconfig-paths": "^4.3.1",
+        "vitest": "^1.6.1"
     },
     "engines": {
         "node": ">=18"

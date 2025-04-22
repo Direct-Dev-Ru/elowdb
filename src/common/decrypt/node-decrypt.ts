@@ -6,7 +6,13 @@
 import * as crypto from 'node:crypto'
 
 // Function to decrypt the Ansible Vault encrypted data
-export function decryptString(data: string, password: string) {
+export async function decryptString(data: string, password: string): Promise<string> {
+    if (!data) {
+        return '';
+    }
+    if (!password) {
+        throw new Error('password is required for decryption');
+    }
     data = replaceCarriageReturn(data)
     const body = splitHeader(data)
     const { salt, cryptedHmac, ciphertext } = decodeData(body)
@@ -26,7 +32,9 @@ export function decryptString(data: string, password: string) {
 
 // Replace carriage return for Windows line endings
 function replaceCarriageReturn(data: string) {
-    return data.replace(/\r/g, '')
+    // Normalize line endings to \n
+    
+    return data.replace(/\r\n/g, '\n');
 }
 
 // Split the header and return the body

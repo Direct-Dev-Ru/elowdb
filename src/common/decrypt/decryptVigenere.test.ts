@@ -1,4 +1,4 @@
-import { deepEqual, equal, throws } from 'node:assert/strict'
+import { equal, throws } from 'node:assert/strict'
 import test from 'node:test'
 
 import { decryptVigenere } from './decryptVigenere.js'

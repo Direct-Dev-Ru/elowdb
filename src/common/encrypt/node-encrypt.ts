@@ -14,13 +14,18 @@ function generateRandomBytes(length: number) {
 }
 
 // Encrypt string data
-export function encryptString(
+export async function encryptString(
     inputString: string,
     password: string,
     force?: boolean,
-): string {
+): Promise<string> {
     const strData = inputString
-
+    if (!inputString) {
+        return '';
+    }
+    if (!password) {
+        throw new Error('password is required for encryption');
+    }
     // Check if the file is already encrypted
     if (strData.startsWith('$ANSIBLE_VAULT;') && !force) {
         throw new Error('data already encrypted and no force flag provided')
@@ -41,7 +46,10 @@ function encrypt(body: string, password: string) {
 // Create ciphertext using AES256
 function createCipherText(body: string, key1: any, iv: any): Buffer {
     const bs = 16 // AES block size
-    const padding = (bs - (body.length % bs)) % bs
+    let padding = (bs - (body.length % bs)) % bs
+    if (padding === 0) {
+        padding = bs;
+    }
     const padChar = String.fromCharCode(padding)
     const plaintext = Buffer.concat([
         Buffer.from(body),

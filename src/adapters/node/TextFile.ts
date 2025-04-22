@@ -4,8 +4,8 @@ import path from 'node:path'
 
 import { Writer } from 'steno'
 
-import { decryptString } from '../../common/decrypt/decrypt.js'
-import { encryptString } from '../../common/encrypt/encrypt.js'
+import { decryptString } from '../../common/decrypt/node-decrypt.js'
+import { encryptString } from '../../common/encrypt/node-encrypt.js'
 import { Adapter, SyncAdapter } from '../../core/Low.js'
 
 export class TextFile implements Adapter<string> {
