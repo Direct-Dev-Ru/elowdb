@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { encryptString } from './browser-encrypt.js';
-import { decryptString } from '../decrypt/browser-decrypt.js';
-// import { encryptString } from './browser-encrypt-common.js';
-// import { decryptString } from '../decrypt/browser-decrypt-common.js';
+import { encryptString } from './browser-encrypt-common.js';
+import { decryptString } from '../decrypt/browser-decrypt-common.js';
 
-describe('browser-encrypt', () => {
+describe('browser-encrypt-common', () => {
     beforeEach(() => {
         // Reset any mocks or state before each test
     });
@@ -19,12 +17,12 @@ describe('browser-encrypt', () => {
         const password = 'test password';
         const encrypted = await encryptString(input, password);
         
-        expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
+        expect(encrypted).toMatch(/^\$ENCRYPTED;1\.1;AES-GCM/);
         expect(encrypted).toContain('\n');
     });
 
     it('should throw error when trying to encrypt already encrypted data', async () => {
-        const input = '$ANSIBLE_VAULT;1.1;AES256\nencrypted_data';
+        const input = '$ENCRYPTED;1.1;AES-GCM\nencrypted_data';
         const password = 'test password';
         
         await expect(encryptString(input, password)).rejects.toThrow(
@@ -33,12 +31,21 @@ describe('browser-encrypt', () => {
     });
 
     it('should encrypt with force flag even if data is already encrypted', async () => {
-        const input = '$ANSIBLE_VAULT;1.1;AES256\nencrypted_data';
+        const input = '$ENCRYPTED;1.1;AES-GCM\nencrypted_data';
         const password = 'test password';
         const encrypted = await encryptString(input, password, true);
         
-        expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
+        expect(encrypted).toMatch(/^\$ENCRYPTED;1\.1;AES-GCM/);
         expect(encrypted).toContain('\n');
+    });
+
+    
+    it('should encrypt same data with same password differently(cause salt is random)', async () => {
+        const password = 'test password';
+        const encrypted1 = await encryptString('test data 1', password);
+        const encrypted2 = await encryptString('test data 1', password);
+        
+        expect(encrypted1).not.toEqual(encrypted2);
     });
 
     it('should encrypt different data with same password differently', async () => {
@@ -71,7 +78,7 @@ describe('browser-encrypt', () => {
         const password = '!@#$%^&*()_+-=[]{}|;:,.<>?';
         const encrypted = await encryptString(input, password);
         
-        expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
+        expect(encrypted).toMatch(/^\$ENCRYPTED;1\.1;AES-GCM/);
         expect(encrypted).toContain('\n');
     });
 
@@ -82,7 +89,7 @@ describe('browser-encrypt', () => {
         const password = 'binary test';
         const encrypted = await encryptString(input, password);
         
-        expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
+        expect(encrypted).toMatch(/^\$ENCRYPTED;1\.1;AES-GCM/);
         expect(encrypted).toContain('\n');
     });
 
@@ -91,7 +98,7 @@ describe('browser-encrypt', () => {
         const password = 'test password';
         const encrypted = await encryptString(longInput, password);
         
-        expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
+        expect(encrypted).toMatch(/^\$ENCRYPTED;1\.1;AES-GCM/);
         expect(encrypted).toContain('\n');
     });
 
@@ -100,7 +107,7 @@ describe('browser-encrypt', () => {
         const longPassword = 'a'.repeat(1000);
         const encrypted = await encryptString(input, longPassword);
         
-        expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
+        expect(encrypted).toMatch(/^\$ENCRYPTED;1\.1;AES-GCM/);
         expect(encrypted).toContain('\n');
     });
 
@@ -124,7 +131,7 @@ describe('browser-encrypt', () => {
             { input: 'text with spaces', password: 'complex password' },
             { input: 'text with special chars: !@#$%^&*()', password: 'password with spaces' },
             { input: 'text with newlines\nand\r\ncarriage returns', password: 'password\nwith\nnewlines' },
-            { input: 'a'.repeat(1000), password: 'long text test' },
+            { input: 'a'.repeat(10000), password: 'long text test' },
             { input: 'Unicode text: 你好世界', password: 'password with unicode' },
             { input: 'Emoji text: 😀🎉🌟', password: 'password with emoji' },
             { input: 'Mixed content: Hello 你好 😀', password: 'mixed password 密码 😊' },

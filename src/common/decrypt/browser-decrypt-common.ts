@@ -1,6 +1,24 @@
 export async function decryptString(encryptedData: string, password: string): Promise<string> {
     // Convert from base64 to Uint8Array
-    const binaryString = atob(encryptedData);
+    if (!encryptedData) {
+        return '';
+    }
+
+    // Normalize line endings to \n
+    encryptedData = encryptedData.replace(/\r\n/g, '\n');
+
+    // console.log("Encrypted String:", encryptedData);
+
+    const lines = encryptedData.split('\n');
+    if (lines?.length < 2) {
+        throw new Error('Encrypted string is empty or invalid');
+    }
+    if (!lines[0]?.startsWith('$ENCRYPTED;')) {
+        throw new Error('Invalid Encrypted format');
+    }
+
+    const encryptedBase64Data = lines[1] || '';
+    const binaryString = atob(encryptedBase64Data);
     const combined = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
         combined[i] = binaryString.charCodeAt(i);
@@ -19,6 +37,7 @@ export async function decryptString(encryptedData: string, password: string): Pr
         false,
         ['deriveBits', 'deriveKey']
     );
+    
 
     // Derive the same key using PBKDF2
     const key = await crypto.subtle.deriveKey(
@@ -33,17 +52,26 @@ export async function decryptString(encryptedData: string, password: string): Pr
         false,
         ['decrypt']
     );
-
+    
     // Decrypt the data
-    const decryptedContent = await crypto.subtle.decrypt(
-        {
-            name: 'AES-GCM',
-            iv: iv
-        },
-        key,
-        encryptedContent
-    );
+    try {
+        const decryptedContent = await crypto.subtle.decrypt(
+            {
+                name: 'AES-GCM',
+                iv: iv
+            },
+            key,
+            encryptedContent
+        );
+        
 
-    // Convert the decrypted data back to a string
-    return new TextDecoder().decode(decryptedContent);
+        const decryptedString = new TextDecoder().decode(decryptedContent);       
+
+        // Convert the decrypted data back to a string
+        return decryptedString;
+    } catch (error) {
+        // console.log("Decryption failed:", error);
+        throw new Error('decryption failed');
+    }
+
 } 
