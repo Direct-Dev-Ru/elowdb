@@ -138,11 +138,11 @@ function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 // Helper function to convert Uint8Array to hex string
-function BufferToString(buffer: Uint8Array): string {
-    return Array.from(buffer)
-        .map(byte => byte.toString(16).padStart(2, '0'))
-        .join('');
-}
+// function BufferToString(buffer: Uint8Array): string {
+//     return Array.from(buffer)
+//         .map(byte => byte.toString(16).padStart(2, '0'))
+//         .join('');
+// }
 
 function arrayBufferToString(buffer: ArrayBuffer): string {
     const decoder = new TextDecoder('utf-8'); // Specify encoding (default is 'utf-8')

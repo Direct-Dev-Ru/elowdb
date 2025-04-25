@@ -1,7 +1,7 @@
 export interface Adapter<T> {
     read: () => Promise<T | null>
     write: (data: T) => Promise<void>
-    decrypt?: (encryptedText: string) => Promise<string | { error: string }>
+    decrypt?: (secretkey: string) => Promise<string | { error: string }>
     encrypt?: (
         secretkey: string,
     ) => Promise<string | { error: string }>
@@ -11,10 +11,9 @@ export interface Adapter<T> {
 export interface SyncAdapter<T> {
     read: () => T | null
     write: (data: T) => void
-    decrypt?: (encryptedText: string) => string | { error: string }
+    decrypt?: (secretkey: string) => string | { error: string }
     encrypt?: (
         secretkey: string,
-        text: string,
     ) => string | { error: string }
     // _cypherKey?: string
 }

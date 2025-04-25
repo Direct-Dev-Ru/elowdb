@@ -1,9 +1,16 @@
-import { deepEqual, equal, throws } from 'node:assert/strict'
+import { deepEqual, equal } from 'node:assert/strict'
 import test from 'node:test'
 
 import { WebStorage } from './WebStorage.js'
+import { bsonOptionsForStorage } from '../../common/bson/bson-option.js'
 
 const storage: { [key: string]: string } = {}
+
+// Example: Using btoa and atob for base64 encoding/decoding
+const base64Options = {
+    parse: (str: string): any => JSON.parse(atob(str)),
+    stringify: (data: any): string => btoa(JSON.stringify(data)),
+};
 
 // Mock localStorage
 const mockStorage = () => ({
@@ -24,26 +31,59 @@ const mockStorage = () => ({
 global.localStorage = mockStorage()
 global.sessionStorage = mockStorage()
 
-await test('localStorage', () => {
-    const obj = { a: 1 }
-    const storage = new WebStorage('key', localStorage)
-
-    // Write
-    equal(storage.write(obj), undefined)
-
-    // Read
-    deepEqual(storage.read(), obj)
+await test('localStorage', async () => {
+    const obj = { id: 1, name: 'test' }
+    const storage = new WebStorage<{ id: number, name: string }>('key base64', localStorage, { ...base64Options })
+        // Write
+    equal(await storage.write(obj), undefined)
+        // Read
+    deepEqual(await storage.read(), obj)
+    console.log('localStorage unencrypted', await storage.read())
+    console.log('localStorage unencrypted in storage representation',global.localStorage.getItem('key base64'))
 })
 
-await test('sessionStorage', () => {
-    const obj = { a: 1 }
+await test('localStorage bson', async () => {
+    const obj = { id: 1, name: 'test' }
+    const storage = new WebStorage<{ id: number, name: string }>('key bson', localStorage, { ...bsonOptionsForStorage })
+        // Write
+    equal(await storage.write(obj), undefined)
+        // Read
+    deepEqual(await storage.read(), obj)
+    console.log('localStorage bson unencrypted', await storage.read())
+    console.log('localStorage bson unencrypted in storage representation',global.localStorage.getItem('key bson'))
+})
+
+await test('localStorage encrypted', async () => {
+    const obj = { id: 1, name: 'test' }
+    const encStorage = new WebStorage<{ id: number, name: string }>('encrypted', localStorage, { _cypherKey: 'secret', })
+    // Write encrypted
+    equal(await encStorage.write(obj), undefined)
+    // Read encrypted   
+    deepEqual(await encStorage.read(), obj)
+    // console.log(global.sessionStorage.getItem('key'))
+    // console.log(global.sessionStorage.getItem('encrypted'))
+    // console.log(await encStorage.read())
+})
+
+await test('sessionStorage without encryption', async () => {
+    const obj = { id: 1, name: 'test' }
     const storage = new WebStorage('key', sessionStorage)
-
     // Write
-    equal(storage.write(obj), undefined)
-
+    equal(await storage.write(obj), undefined)
     // Read
-    deepEqual(storage.read(), obj)
+    deepEqual(await storage.read(), obj)    
+})
+
+await test('sessionStorage encrypted', async () => {
+    const obj = { id: 1, name: 'test' }
+    const encStorage = new WebStorage<{ id: number, name: string }>('encrypted', sessionStorage, { _cypherKey: 'secret' })
+    // Write encrypted
+    equal(await encStorage.write(obj), undefined)
+    // Read encrypted   
+    deepEqual(await encStorage.read(), obj)
+    // console.log(global.sessionStorage.getItem('key'))
+    // console.log(global.sessionStorage.getItem('encrypted'))
+    // console.log(await encStorage.read())
 })
 
 // const vigenereEncrypt = (text: string, key: string): string => {

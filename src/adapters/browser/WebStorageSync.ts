@@ -1,8 +1,8 @@
-import { Adapter } from '../../core/Low.js'
-import { decryptString } from '../../common/decrypt/browser-decrypt-common.js'
-import { encryptString } from '../../common/encrypt/browser-encrypt-common.js'
+import { SyncAdapter } from '../../core/Low.js'
+import { encryptVigenere } from '../../common/encrypt/encryptVigenere.js'
+import { decryptVigenere } from '../../common/decrypt/decryptVigenere.js';
 
-export const defEncrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
+export const defEncryptSync = (text: string, cypherKey: string): string | { error: string } => {
   if (typeof text !== "string" || typeof cypherKey !== "string") {
     return { error: "text and cypherKey must be strings" };
   }
@@ -13,23 +13,23 @@ export const defEncrypt = async (text: string, cypherKey: string): Promise<strin
   //   result += String.fromCharCode(text.charCodeAt(i) ^ cypherKey.charCodeAt(i % cypherKey.length))
   // }
   try {
-    const encrypted = await encryptString(text, cypherKey);
+    const encrypted = encryptVigenere(text, cypherKey);
     return encrypted;
   } catch (error) {
-    return { error: "encryption failed" };
+    return { error: "Encryption failed" };
   }
 }
 
-export const defDecrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
+export const defDecryptSync = (text: string, cypherKey: string): string | { error: string } => {
   if (typeof text !== "string" || typeof cypherKey !== "string") {
     return { error: "text and cypherKey must be strings" };
   }
   if (!cypherKey) return text
   try {
-    const decrypted = await decryptString(text, cypherKey);
+    const decrypted = decryptVigenere(text, cypherKey);
     return decrypted;
   } catch (error) {
-    return { error: "decryption failed" };
+    return { error: "Decryption failed" };
   }
   // Simple XOR encryption for demonstration
   // let result = ''
@@ -39,16 +39,16 @@ export const defDecrypt = async (text: string, cypherKey: string): Promise<strin
   // return result
 }
 
-export class WebStorage<T> implements Adapter<T> {
+export class WebStorageSync<T> implements SyncAdapter<T> {
   private key: string
   private storage: Storage
   private parse: (str: string) => T
   private stringify: (data: T) => string
-  __decrypt: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }> = defDecrypt
+  __decrypt: (encryptedText: string, cypherKey: string) => string | { error: string } = defDecryptSync
   __encrypt: (
     secretkey: string,
     text: string,
-  ) => Promise<string | { error: string }> = defEncrypt
+  ) => string | { error: string } = defEncryptSync
 
   private _cypherKey?: string
 
@@ -59,11 +59,11 @@ export class WebStorage<T> implements Adapter<T> {
       parse?: (str: string) => T
       stringify?: (data: T) => string
       _cypherKey?: string
-      decrypt?: (encryptedText: string) => Promise<string | { error: string }>
+      decrypt?: (encryptedText: string) => string | { error: string }
       encrypt?: (
         secretkey: string,
         text: string,
-      ) => Promise<string | { error: string }>
+      ) => string | { error: string }
     } = {}
   ) {
     this.key = key
@@ -79,27 +79,13 @@ export class WebStorage<T> implements Adapter<T> {
     this._cypherKey = options._cypherKey || ''
   }
 
-  get decrypt(): (secretkey: string) => Promise<string | { error: string }> {
-    return (secretkey: string = this._cypherKey as string) => {
-      const value = this.storage.getItem(this.key) || ''
-      return this.__decrypt(value, secretkey)
-    }
-  }
-
-  get encrypt(): (secretkey: string) => Promise<string | { error: string }> {
-    return (secretkey: string = this._cypherKey as string) => {
-      const value = this.storage.getItem(this.key) || ''
-      return this.__encrypt(value, secretkey)
-    }
-  }
-
-  async read(): Promise<T | null> {
+  read(): T | null {
     const value = this.storage.getItem(this.key)
     if (value === null) {
       return null
     }
     if (this._cypherKey?.length || 0 > 0) {
-      const decrypted = await this.__decrypt(value, this._cypherKey as string)
+      const decrypted = this.__decrypt(value, this._cypherKey as string)
       const error = decrypted as { error: string }
       if (error?.error) {
         //   console.log("decrypted error:", `Decryption failed: ${error.error}`);
@@ -110,10 +96,10 @@ export class WebStorage<T> implements Adapter<T> {
     return this.parse(value)
   }
 
-  async write(obj: T): Promise<void> {
+  write(obj: T): void {
     const stringified = this.stringify(obj)
     if (this._cypherKey?.length || 0 > 0) {
-      const encrypted = await this.__encrypt(stringified, this._cypherKey as string)
+      const encrypted = this.__encrypt(stringified, this._cypherKey as string)
       const error = encrypted as { error: string }
       if (error?.error) {
         //   console.log("encrypted error:", `Encryption failed: ${error.error}`);

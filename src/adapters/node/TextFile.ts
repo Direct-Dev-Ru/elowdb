@@ -4,8 +4,8 @@ import path from 'node:path'
 
 import { Writer } from 'steno'
 
-import { decryptString } from '../../common/decrypt/node-decrypt.js'
-import { encryptString } from '../../common/encrypt/node-encrypt.js'
+import { decryptString, decryptStringSync } from '../../common/decrypt/node-decrypt.js'
+import { encryptString, encryptStringSync } from '../../common/encrypt/node-encrypt.js'
 import { Adapter, SyncAdapter } from '../../core/Low.js'
 
 export class TextFile implements Adapter<string> {
@@ -37,12 +37,12 @@ export class TextFile implements Adapter<string> {
         return data
     }
 
-    write(str: string): Promise<void> {
+    async write(str: string): Promise<void> {
         if (!this._cypherKey) {
             return this.#writer.write(str)
         }
-        const encData = encryptString(str, this._cypherKey)
-        return this.#writer.write(encData)
+        const encryptedData = await encryptString(str, this._cypherKey)
+        return this.#writer.write(encryptedData)
     }
 }
 
@@ -67,7 +67,7 @@ export class TextFileSync implements SyncAdapter<string> {
         try {
             data = readFileSync(this.#filename, 'utf-8')
             if (this._cypherKey) {
-                data = decryptString(data, this._cypherKey)
+                data = decryptStringSync(data, this._cypherKey)
             }
         } catch (e) {
             if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -85,8 +85,8 @@ export class TextFileSync implements SyncAdapter<string> {
             renameSync(this.#tempFilename, this.#filename)
             return
         }
-        const encData = encryptString(str, this._cypherKey)
-        writeFileSync(this.#tempFilename, encData)
+        const encryptedData = encryptStringSync(str, this._cypherKey)
+        writeFileSync(this.#tempFilename, encryptedData)
         renameSync(this.#tempFilename, this.#filename)
     }
 }

@@ -26,6 +26,23 @@ export async function encryptString(
     if (!password) {
         throw new Error('password is required for encryption');
     }
+
+    return encryptStringSync(strData, password, force)
+}
+
+// Encrypt string data Sync
+export function encryptStringSync(
+    inputString: string,
+    password: string,
+    force?: boolean,
+): string {
+    const strData = inputString
+    if (!inputString) {
+        return '';
+    }
+    if (!password) {
+        throw new Error('password is required for encryption');
+    }
     // Check if the file is already encrypted
     if (strData.startsWith('$ANSIBLE_VAULT;') && !force) {
         throw new Error('data already encrypted and no force flag provided')

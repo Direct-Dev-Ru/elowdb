@@ -6,7 +6,43 @@
 import * as crypto from 'node:crypto'
 
 // Function to decrypt the Ansible Vault encrypted data
+// export async function decryptString(data: string, password: string): Promise<string> {
+//     if (!data) {
+//         return '';
+//     }
+//     if (!password) {
+//         throw new Error('password is required for decryption');
+//     }
+//     data = replaceCarriageReturn(data)
+//     const body = splitHeader(data)
+//     const { salt, cryptedHmac, ciphertext } = decodeData(body)
+//     const { key1, key2, iv } = genKeyInitctr(password, salt)
+//     checkDigest(key2, cryptedHmac, ciphertext)
+
+//     const decipher = crypto.createDecipheriv('aes-256-ctr', key1, iv)
+//     let plaintext = decipher.update(ciphertext)
+//     plaintext = Buffer.concat([plaintext, decipher.final()])
+
+//     // Remove padding
+//     const padding = plaintext[plaintext.length - 1]
+//     return plaintext
+//         .slice(0, plaintext.length - (padding ? padding : 0))
+//         .toString()
+// }
+
+// Function to decrypt the Ansible Vault encrypted data
 export async function decryptString(data: string, password: string): Promise<string> {
+    if (!data) {
+        return '';
+    }
+    if (!password) {
+        throw new Error('password is required for decryption');
+    }
+    return decryptStringSync(data, password)
+}
+
+// Function to decrypt the Ansible Vault encrypted data
+export function decryptStringSync(data: string, password: string): string {
     if (!data) {
         return '';
     }
@@ -30,10 +66,12 @@ export async function decryptString(data: string, password: string): Promise<str
         .toString()
 }
 
+
+
 // Replace carriage return for Windows line endings
 function replaceCarriageReturn(data: string) {
     // Normalize line endings to \n
-    
+
     return data.replace(/\r\n/g, '\n');
 }
 
