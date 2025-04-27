@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { encryptString } from './browser-encrypt.js';
-import { decryptString } from '../decrypt/browser-decrypt.js';
-// import { encryptString } from './browser-encrypt-common.js';
-// import { decryptString } from '../decrypt/browser-decrypt-common.js';
+import { encryptStringBrowserAnsibleVault } from './browser-encrypt.js';
+import { decryptStringBrowserAnsibleVault } from '../decrypt/browser-decrypt.js';
+// import { encryptStringBrowserAnsibleVault } from './browser-encrypt-common.js';
+// import { decryptStringBrowserAnsibleVault } from '../decrypt/browser-decrypt-common.js';
 
 describe('browser-encrypt', () => {
     beforeEach(() => {
@@ -17,7 +17,7 @@ describe('browser-encrypt', () => {
     it('should encrypt a string', async () => {
         const input = 'test data';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
+        const encrypted = await encryptStringBrowserAnsibleVault(input, password);
         
         expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
         expect(encrypted).toContain('\n');
@@ -27,7 +27,7 @@ describe('browser-encrypt', () => {
         const input = '$ANSIBLE_VAULT;1.1;AES256\nencrypted_data';
         const password = 'test password';
         
-        await expect(encryptString(input, password)).rejects.toThrow(
+        await expect(encryptStringBrowserAnsibleVault(input, password)).rejects.toThrow(
             'data already encrypted and no force flag provided'
         );
     });
@@ -35,7 +35,7 @@ describe('browser-encrypt', () => {
     it('should encrypt with force flag even if data is already encrypted', async () => {
         const input = '$ANSIBLE_VAULT;1.1;AES256\nencrypted_data';
         const password = 'test password';
-        const encrypted = await encryptString(input, password, true);
+        const encrypted = await encryptStringBrowserAnsibleVault(input, password, true);
         
         expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
         expect(encrypted).toContain('\n');
@@ -43,16 +43,16 @@ describe('browser-encrypt', () => {
 
     it('should encrypt different data with same password differently', async () => {
         const password = 'test password';
-        const encrypted1 = await encryptString('test data 1', password);
-        const encrypted2 = await encryptString('test data 2', password);
+        const encrypted1 = await encryptStringBrowserAnsibleVault('test data 1', password);
+        const encrypted2 = await encryptStringBrowserAnsibleVault('test data 2', password);
         
         expect(encrypted1).not.toEqual(encrypted2);
     });
 
     it('should encrypt same data with different passwords differently', async () => {
         const input = 'test data';
-        const encrypted1 = await encryptString(input, 'password1');
-        const encrypted2 = await encryptString(input, 'password2');
+        const encrypted1 = await encryptStringBrowserAnsibleVault(input, 'password1');
+        const encrypted2 = await encryptStringBrowserAnsibleVault(input, 'password2');
         
         expect(encrypted1).not.toEqual(encrypted2);
     });
@@ -61,7 +61,7 @@ describe('browser-encrypt', () => {
         const input = 'test data';
         const password = '';
         
-        await expect(encryptString(input, password)).rejects.toThrow(
+        await expect(encryptStringBrowserAnsibleVault(input, password)).rejects.toThrow(
             'password is required for encryption'
         );
     });
@@ -69,7 +69,7 @@ describe('browser-encrypt', () => {
     it('should handle special characters in password', async () => {
         const input = 'test data';
         const password = '!@#$%^&*()_+-=[]{}|;:,.<>?';
-        const encrypted = await encryptString(input, password);
+        const encrypted = await encryptStringBrowserAnsibleVault(input, password);
         
         expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
         expect(encrypted).toContain('\n');
@@ -80,7 +80,7 @@ describe('browser-encrypt', () => {
             String.fromCharCode(...Array.from({ length: 256 }, (_, i) => i))
         ).toString();
         const password = 'binary test';
-        const encrypted = await encryptString(input, password);
+        const encrypted = await encryptStringBrowserAnsibleVault(input, password);
         
         expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
         expect(encrypted).toContain('\n');
@@ -89,7 +89,7 @@ describe('browser-encrypt', () => {
     it('should handle very long input strings', async () => {
         const longInput = 'a'.repeat(10000);
         const password = 'test password';
-        const encrypted = await encryptString(longInput, password);
+        const encrypted = await encryptStringBrowserAnsibleVault(longInput, password);
         
         expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
         expect(encrypted).toContain('\n');
@@ -98,7 +98,7 @@ describe('browser-encrypt', () => {
     it('should handle very long passwords', async () => {
         const input = 'test data';
         const longPassword = 'a'.repeat(1000);
-        const encrypted = await encryptString(input, longPassword);
+        const encrypted = await encryptStringBrowserAnsibleVault(input, longPassword);
         
         expect(encrypted).toMatch(/^\$ANSIBLE_VAULT;1\.1;AES256/);
         expect(encrypted).toContain('\n');
@@ -110,7 +110,7 @@ describe('browser-encrypt', () => {
         const results = new Set();
         
         for (let i = 0; i < 10; i++) {
-            const encrypted = await encryptString(input, password);
+            const encrypted = await encryptStringBrowserAnsibleVault(input, password);
             results.add(encrypted);
         }
         
@@ -138,8 +138,8 @@ describe('browser-encrypt', () => {
         ];
 
         for (const { input, password } of testCases) {
-            const encrypted = await encryptString(input, password);
-            const decrypted = await decryptString(encrypted, password);
+            const encrypted = await encryptStringBrowserAnsibleVault(input, password);
+            const decrypted = await decryptStringBrowserAnsibleVault(encrypted, password);
             expect(decrypted).toEqual(input);
         }
     });

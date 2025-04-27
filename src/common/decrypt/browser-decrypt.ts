@@ -1,5 +1,5 @@
 // Decrypt string data
-export async function decryptString(encryptedString: string, password: string): Promise<string> {
+export async function decryptStringBrowserAnsibleVault(encryptedString: string, password: string): Promise<string> {
     if (!encryptedString) {
         return '';
     }

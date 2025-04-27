@@ -14,7 +14,7 @@ function generateRandomBytes(length: number): Uint8Array {
 }
 
 // Encrypt string data
-export async function encryptString(inputString: string, password: string, force: boolean = false): Promise<string> {
+export async function encryptStringBrowserAnsibleVault(inputString: string, password: string, force: boolean = false): Promise<string> {
     if (!inputString) {
         return '';
     }

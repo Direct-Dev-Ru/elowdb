@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { decryptString } from './node-decrypt.js';
-import { encryptString } from '../encrypt/node-encrypt.js';
+import { decryptStringNodeAnsibleVault } from './node-decrypt.js';
+import { encryptStringNodeAnsibleVault } from '../encrypt/node-encrypt.js';
 
 
 describe('node-decrypt', () => {
@@ -16,8 +16,8 @@ describe('node-decrypt', () => {
     it('should decrypt encrypted data', async () => {
         const input = 'test data';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -25,9 +25,9 @@ describe('node-decrypt', () => {
     it('should throw error for invalid password', async () => {
         const input = 'test data';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
         
-        await expect(decryptString(encrypted, 'wrong password')).rejects.toThrow(
+        await expect(decryptStringNodeAnsibleVault(encrypted, 'wrong password')).rejects.toThrow(
             'digests do not match - exiting'
         );
     });
@@ -36,7 +36,7 @@ describe('node-decrypt', () => {
         const invalidCipher = '$ANSIBLE_VAULT;1.1;INVALID\ninvalid_data';
         const password = 'test password';
         
-        await expect(decryptString(invalidCipher, password)).rejects.toThrow(
+        await expect(decryptStringNodeAnsibleVault(invalidCipher, password)).rejects.toThrow(
             'unsupported cypher: INVALID'
         );
     });
@@ -44,18 +44,18 @@ describe('node-decrypt', () => {
     it('should handle Windows line endings', async () => {
         const input = 'test data';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
         const encryptedWithWindowsEndings = encrypted.replace(/\n/g, '\r\n');
         
-        const decrypted = await decryptString(encryptedWithWindowsEndings, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encryptedWithWindowsEndings, password);
         expect(decrypted).toEqual(input);
     });
 
     it('should handle empty strings', async () => {
         const input = '';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -63,8 +63,8 @@ describe('node-decrypt', () => {
     it('should handle special characters', async () => {
         const input = '!@#$%^&*()_+-=[]{}|;:,.<>?';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -72,8 +72,8 @@ describe('node-decrypt', () => {
     it('should handle Unicode characters', async () => {
         const input = '你好世界';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -81,8 +81,8 @@ describe('node-decrypt', () => {
     it('should handle emoji characters', async () => {
         const input = '😀🎉🌟';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -90,8 +90,8 @@ describe('node-decrypt', () => {
     it('should handle mixed content', async () => {
         const input = 'Hello 你好 😀';
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -99,8 +99,8 @@ describe('node-decrypt', () => {
     it('should handle very long input', async () => {
         const input = 'a'.repeat(10000);
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         // console.log(decrypted.length, input.length);
         expect(decrypted).toEqual(input);
     });
@@ -108,8 +108,8 @@ describe('node-decrypt', () => {
     it('should handle very long password', async () => {
         const input = 'test data';
         const password = 'a'.repeat(1000);
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -117,8 +117,8 @@ describe('node-decrypt', () => {
     it('should handle binary data', async () => {
         const input = Buffer.from(Array.from({ length: 256 }, (_, i) => i)).toString('utf8');
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
-        const decrypted = await decryptString(encrypted, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
     });
@@ -126,9 +126,9 @@ describe('node-decrypt', () => {
     it('should handle JSON data', async () => {
         const input = JSON.stringify({ key: 'value', array: [1, 2, 3] });
         const password = 'test password';
-        const encrypted = await encryptString(input, password);
+        const encrypted = await encryptStringNodeAnsibleVault(input, password);
         // console.log("encrypted :", encrypted);
-        const decrypted = await decryptString(encrypted, password);
+        const decrypted = await decryptStringNodeAnsibleVault(encrypted, password);
         
         expect(decrypted).toEqual(input);
         expect(JSON.parse(decrypted)).toEqual(JSON.parse(input));

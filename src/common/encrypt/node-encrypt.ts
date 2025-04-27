@@ -14,7 +14,7 @@ function generateRandomBytes(length: number) {
 }
 
 // Encrypt string data
-export async function encryptString(
+export async function encryptStringNodeAnsibleVault(
     inputString: string,
     password: string,
     force?: boolean,
@@ -27,11 +27,11 @@ export async function encryptString(
         throw new Error('password is required for encryption');
     }
 
-    return encryptStringSync(strData, password, force)
+    return encryptStringSyncNodeAnsibleVault(strData, password, force)
 }
 
 // Encrypt string data Sync
-export function encryptStringSync(
+export function encryptStringSyncNodeAnsibleVault(
     inputString: string,
     password: string,
     force?: boolean,

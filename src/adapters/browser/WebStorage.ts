@@ -2,7 +2,7 @@ import { Adapter } from '../../core/Low.js'
 import { decryptString } from '../../common/decrypt/browser-decrypt-common.js'
 import { encryptString } from '../../common/encrypt/browser-encrypt-common.js'
 
-export const defEncrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
+export const defBrowserEncrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
   if (typeof text !== "string" || typeof cypherKey !== "string") {
     return { error: "text and cypherKey must be strings" };
   }
@@ -16,11 +16,11 @@ export const defEncrypt = async (text: string, cypherKey: string): Promise<strin
     const encrypted = await encryptString(text, cypherKey);
     return encrypted;
   } catch (error) {
-    return { error: "encryption failed" };
+    return { error: "Encryption failed" };
   }
 }
 
-export const defDecrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
+export const defBrowserDecrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
   if (typeof text !== "string" || typeof cypherKey !== "string") {
     return { error: "text and cypherKey must be strings" };
   }
@@ -29,7 +29,7 @@ export const defDecrypt = async (text: string, cypherKey: string): Promise<strin
     const decrypted = await decryptString(text, cypherKey);
     return decrypted;
   } catch (error) {
-    return { error: "decryption failed" };
+    return { error: "Decryption failed" };
   }
   // Simple XOR encryption for demonstration
   // let result = ''
@@ -44,11 +44,11 @@ export class WebStorage<T> implements Adapter<T> {
   private storage: Storage
   private parse: (str: string) => T
   private stringify: (data: T) => string
-  __decrypt: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }> = defDecrypt
+  __decrypt: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }> = defBrowserDecrypt
   __encrypt: (
     secretkey: string,
     text: string,
-  ) => Promise<string | { error: string }> = defEncrypt
+  ) => Promise<string | { error: string }> = defBrowserEncrypt
 
   private _cypherKey?: string
 

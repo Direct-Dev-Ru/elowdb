@@ -1,5 +1,5 @@
 import { Adapter } from "../../core/Low.js";
-import { defDecrypt, defEncrypt } from "./WebStorage.js";
+import { defBrowserDecrypt, defBrowserEncrypt } from "./WebStorage.js";
 
 
 class indexedDBStorage {
@@ -196,11 +196,11 @@ export class IndexedDbStorage<T> implements Adapter<T> {
     private storage: indexedDBStorage
     private parse: (str: string) => T
     private stringify: (data: T) => string
-    _decrypt: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }> = defDecrypt
+    _decrypt: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }> = defBrowserDecrypt
     _encrypt: (
         secretkey: string,
         text: string,
-    ) => Promise<string | { error: string }> = defEncrypt
+    ) => Promise<string | { error: string }> = defBrowserEncrypt
 
     private _cypherKey?: string
 

@@ -31,18 +31,18 @@ import * as crypto from 'node:crypto'
 // }
 
 // Function to decrypt the Ansible Vault encrypted data
-export async function decryptString(data: string, password: string): Promise<string> {
+export async function decryptStringNodeAnsibleVault(data: string, password: string): Promise<string> {
     if (!data) {
         return '';
     }
     if (!password) {
         throw new Error('password is required for decryption');
     }
-    return decryptStringSync(data, password)
+    return decryptStringSyncNodeAnsibleVault(data, password)
 }
 
 // Function to decrypt the Ansible Vault encrypted data
-export function decryptStringSync(data: string, password: string): string {
+export function decryptStringSyncNodeAnsibleVault(data: string, password: string): string {
     if (!data) {
         return '';
     }

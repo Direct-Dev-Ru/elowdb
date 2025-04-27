@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { PathLike } from 'fs'
+import { defNodeEncrypt, defNodeDecrypt, defNodeEncryptSync, defNodeDecryptSync } from './TextFile.js'
 
 import { DataFile, DataFileSync } from './DataFile.js'
 
@@ -15,9 +16,21 @@ export class JSONFile<T> extends DataFile<T> {
     constructor(
         filename: PathLike,
         _cypherKey: string = '',
-        serializers: Serializers<T> = defaultSerializers,
+        options: {
+            serializers?: Serializers<T>,
+            decrypt?: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }>
+            encrypt?: (
+                text: string,
+                cypherKey: string,
+            ) => Promise<string | { error: string }>
+        } = {}
     ) {
-        super(filename, _cypherKey, serializers)
+        super(filename, _cypherKey, {
+            parse: options?.serializers?.parse || defaultSerializers.parse,
+            stringify: options?.serializers?.stringify || defaultSerializers.stringify,
+            decrypt: options?.decrypt ?? defNodeDecrypt,
+            encrypt: options?.encrypt ?? defNodeEncrypt
+        })
     }
 }
 
@@ -25,8 +38,20 @@ export class JSONFileSync<T> extends DataFileSync<T> {
     constructor(
         filename: PathLike,
         _cypherKey: string = '',
-        _serializers: Serializers<T> = defaultSerializers,
+        options: {
+            serializers?: Serializers<T>,
+            decrypt?: (encryptedText: string, cypherKey: string) => string | { error: string }
+            encrypt?: (
+                text: string,
+                cypherKey: string,
+            ) => string | { error: string }
+        } = {}
     ) {
-        super(filename, _cypherKey, _serializers)
+        super(filename, _cypherKey, {
+            parse: options?.serializers?.parse || defaultSerializers.parse,
+            stringify: options?.serializers?.stringify || defaultSerializers.stringify,
+            decrypt: options?.decrypt ?? defNodeDecryptSync,
+            encrypt: options?.encrypt ?? defNodeEncryptSync
+        })
     }
 }

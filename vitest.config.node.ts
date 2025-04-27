@@ -26,7 +26,7 @@ export const nodeConfig = defineConfig({
     test: {
         ...commonConfig,
         name: 'node',
-        include: ['**/*.test.{js,ts,jsx,tsx}'],
+        include: ['**/*.vi.test.{js,ts,jsx,tsx}'],
         exclude: ['**/node_modules/**', '**/dist/**', '**/*.spec.{js,ts,jsx,tsx}'],
         environment: 'node'
     }

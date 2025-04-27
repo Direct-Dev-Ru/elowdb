@@ -21,6 +21,26 @@ function fromBase64(base64String: string): Uint8Array {
     }
 }
 
+function toString(array: Uint8Array): string {
+    if (typeof Buffer !== 'undefined') {
+        // Node.js environment
+        return Buffer.from(array).toString();
+    } else {
+        // Browser environment
+        return String.fromCharCode(...array);
+    }
+}
+
+function fromString(string: string): Uint8Array {
+    if (typeof Buffer !== 'undefined') {
+        // Node.js environment
+        return new Uint8Array(Buffer.from(string));
+    } else {
+        // Browser environment
+        return Uint8Array.from(string);
+    }
+}
+
 // BSON-based parse and stringify options
 export const bsonOptionsForStorage = {
     parse: (bufferString: string): any => {
@@ -36,6 +56,27 @@ export const bsonOptionsForStorage = {
         try {
             const buffer = serialize(data);
             return toBase64(buffer);
+        } catch (error) {
+            console.error('Error stringifying BSON data:', error);
+            return '';
+        }
+    },
+};
+
+export const clearBsonOptionsForStorage = {
+    parse: (bufferString: string): any => {
+        try {
+            const buffer = fromString(bufferString);
+            return deserialize(buffer);
+        } catch (error) {
+            console.error('Error parsing BSON data:', error);
+            return null;
+        }
+    },
+    stringify: (data: any): string => {
+        try {
+            const buffer = serialize(data);
+            return toString(buffer);
         } catch (error) {
             console.error('Error stringifying BSON data:', error);
             return '';
