@@ -63,6 +63,8 @@ export const bsonOptionsForStorage = {
     },
 };
 
+// clear bson options for storage - without base64
+// it is not passing tests and not works as expected
 export const clearBsonOptionsForStorage = {
     parse: (bufferString: string): any => {
         try {

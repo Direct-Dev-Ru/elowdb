@@ -12,7 +12,7 @@ import test from 'node:test'
 
 // import { temporaryFile } from 'tempy'
 import { JSONFile } from '../adapters/node/JSONFile.js'
-import { UpdLow } from './Low.js'
+import { UpdLow } from './UpdLow.js'
 
 interface TestData {
     value?: number
@@ -48,7 +48,7 @@ const AfterEach = async <T = unknown>(
 await test('should initialize with default data', async () => {
     const testFilePath = await BeforeEach()
     const defaultData: TestData = { value: 42 }
-    const db = new UpdLow(adapter, defaultData, 2000)
+    const db = new UpdLow(adapter, 2000, defaultData)
     await new Promise((resolve) => setTimeout(resolve, 100))
     assert.deepEqual(db.data, defaultData)
     assert.equal(db.lastMod, 0)
@@ -59,7 +59,7 @@ await test('should initialize with default data', async () => {
 await test('should only refresh when data is unchanged', async () => {
     const testFilePath = await BeforeEach()
     writeFileSync(testFilePath, JSON.stringify({ value: 1 }))
-    const db = new UpdLow(adapter, {}, 2000)
+    const db = new UpdLow(adapter, 2000, {})
     await db.read() // Initial read
 
     const firstReadTime = db.lastFetch

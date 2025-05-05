@@ -32,9 +32,9 @@ export class DataFile<T> implements Adapter<T> {
     async read(): Promise<T | null> {
         const data = await this.#adapter.read()
 
-        if (process.env.NODE_ENV === 'test') {
-            console.log('read() - data:', data)
-        }
+        // if (process.env.NODE_ENV === 'test') {
+        //     console.log('read() - data:', data)
+        // }
         if (data === null) {
             return null
         } else {
@@ -43,8 +43,15 @@ export class DataFile<T> implements Adapter<T> {
 
     }
 
-    write(obj: T): Promise<void> {
-        return this.#adapter.write(this.#stringify(obj))
+    async write(obj: T): Promise<void> {
+        try {  
+            return this.#adapter.write(this.#stringify(obj))
+        } catch (error) {
+            if (process.env.NODE_ENV === 'test') {
+                console.log('error in write:', error);
+            }
+            throw error
+        }
     }
 }
 

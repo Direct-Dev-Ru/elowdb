@@ -117,6 +117,7 @@ export class TextFile implements Adapter<string> {
             return this.#writer.write(strDataToWrite)
         }
         const encryptedData = await this.#encrypt(strDataToWrite, this._cypherKey || '')
+
         if (typeof encryptedData !== 'string') {
             const error = encryptedData as { error: string }
             throw new Error(`Encryption failed ${error.error}`)

@@ -6,6 +6,11 @@
 >
 > If you know JavaScript, you know how to use lowdb.
 
+to run vitest for node:
+```
+npm run test:vitest:node .\src\adapters\node\BSONFile.vi.test.ts
+```
+
 Read or create `db.json`
 
 ```js
