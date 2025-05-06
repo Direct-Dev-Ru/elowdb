@@ -1,6 +1,6 @@
 {
     "name": "enclowdb",
-    "version": "7.0.2",
+    "version": "7.0.3",
     "description": "Tiny local JSON database for Node, Electron and the browser (with optional encoding)",
     "keywords": [
         "database",
@@ -19,29 +19,32 @@
     ],
     "homepage": "https://github.com/direct-dev-ru/elowdb#readme",
     "bugs": {
-        "url": "https://github.com/direct-dev-ru/elowdb/lowdb/issues"
+        "url": "https://github.com/direct-dev-ru/elowdb/issues"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/https://github.com/direct-dev-ru/elowdb.git"
+        "url": "git+https://github.com/direct-dev-ru/elowdb.git"
     },
     "license": "MIT",
     "author": "Direct-Dev-Ru <info@direct-dev.ru> forked from Typicode <typicode@gmail.com>",
     "type": "module",
+    "main": "./lib/index.js",
+    "types": "./lib/index.d.ts",
     "exports": {
-        ".": "./lib/index.js",
-        "./node": "./lib/node.js",
-        "./browser": "./lib/browser.js"
-    },
-    "types": "./lib",
-    "typesVersions": {
-        "*": {
-            "node": [
-                "lib/node.d.ts"
-            ],
-            "browser": [
-                "lib/browser.d.ts"
-            ]
+        ".": {
+            "types": "./lib/index.d.ts",
+            "import": "./lib/index.js",
+            "require": "./lib/index.js"
+        },
+        "./node": {
+            "types": "./lib/node.d.ts",
+            "import": "./lib/node.js",
+            "require": "./lib/node.js"
+        },
+        "./browser": {
+            "types": "./lib/browser.d.ts",
+            "import": "./lib/browser.js",
+            "require": "./lib/browser.js"
         }
     },
     "files": [
