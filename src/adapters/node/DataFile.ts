@@ -3,13 +3,11 @@ import { PathLike } from 'fs'
 import { Adapter, SyncAdapter } from '../../core/Low.js'
 import { TextFile, TextFileSync } from './TextFile.js'
 
-
 export class DataFile<T> implements Adapter<T> {
     #adapter: TextFile
 
     #parse: (str: string) => T
     #stringify: (data: T) => string
-
 
     constructor(
         filename: PathLike,
@@ -17,14 +15,20 @@ export class DataFile<T> implements Adapter<T> {
         options: {
             parse?: (str: string) => T
             stringify?: (data: T) => string
-            decrypt?: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }>
+            decrypt?: (
+                encryptedText: string,
+                cypherKey: string,
+            ) => Promise<string | { error: string }>
             encrypt?: (
                 text: string,
                 cypherKey: string,
             ) => Promise<string | { error: string }>
-        } = {}
+        } = {},
     ) {
-        this.#adapter = new TextFile(filename, _cypherKey, { decrypt: options.decrypt, encrypt: options.encrypt })
+        this.#adapter = new TextFile(filename, _cypherKey, {
+            decrypt: options.decrypt,
+            encrypt: options.encrypt,
+        })
         this.#parse = options.parse || JSON.parse
         this.#stringify = options.stringify || JSON.stringify
     }
@@ -40,15 +44,14 @@ export class DataFile<T> implements Adapter<T> {
         } else {
             return this.#parse(data)
         }
-
     }
 
     async write(obj: T): Promise<void> {
-        try {  
+        try {
             return this.#adapter.write(this.#stringify(obj))
         } catch (error) {
             if (process.env.NODE_ENV === 'test') {
-                console.log('error in write:', error);
+                console.log('error in write:', error)
             }
             throw error
         }
@@ -66,14 +69,20 @@ export class DataFileSync<T> implements SyncAdapter<T> {
         options: {
             parse?: (str: string) => T
             stringify?: (data: T) => string
-            decrypt?: (encryptedText: string, cypherKey: string) => string | { error: string }
+            decrypt?: (
+                encryptedText: string,
+                cypherKey: string,
+            ) => string | { error: string }
             encrypt?: (
                 text: string,
                 cypherKey: string,
             ) => string | { error: string }
-        } = {}
+        } = {},
     ) {
-        this.#adapter = new TextFileSync(filename, _cypherKey, { decrypt: options.decrypt, encrypt: options.encrypt })
+        this.#adapter = new TextFileSync(filename, _cypherKey, {
+            decrypt: options.decrypt,
+            encrypt: options.encrypt,
+        })
         this.#parse = options.parse || JSON.parse
         this.#stringify = options.stringify || JSON.stringify
     }

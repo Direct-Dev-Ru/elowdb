@@ -1,11 +1,11 @@
-
-import { Adapter } from "./Low.js"
 import cron from 'node-cron'
+
+import { Adapter } from './Low.js'
 
 /**
  * A class that provides updatable low-level data management with automatic refresh capabilities.
  * It maintains data synchronization between local and remote storage while handling dirty states.
- * 
+ *
  * @template T - The type of data being managed
  */
 export class UpdLow<T = unknown> {
@@ -35,7 +35,7 @@ export class UpdLow<T = unknown> {
 
     /**
      * Creates a new instance of UpdLow
-     * 
+     *
      * @param adapter - The adapter used for reading and writing data
      * @param _refreshIntervalMs - The interval in milliseconds between automatic updates (defaults to 200ms)
      * @param defaultData - Optional initial data to use
@@ -43,24 +43,29 @@ export class UpdLow<T = unknown> {
     constructor(
         adapter: Adapter<T>,
         _refreshIntervalMs?: number,
-        defaultData?: T
+        defaultData?: T,
     ) {
         // checkArgs(adapter, defaultData || {})
         this.adapter = adapter
         if (!defaultData) {
-            console.log("init data reading from disk ... ")
+            console.log('init data reading from disk ... ')
             setTimeout(() => {
                 this.read()
-                    // .then((data: T | null) => {
-                    //     this._data = data as T
-                    //     console.log("init data reading from disk is: ", this._data)
-                    // })
-                    .catch(
-                        (error) => {
-                            console.error('Initial read failed:', error)
-                            this._data = {} as T
+                    .then(() => {
+                        if (this._data) {
+                            console.log(
+                                'init data reading from disk is: ',
+                                this._data,
+                            )
+                        } else {
+                            this._data = null as unknown as T
+                            console.error('Initial read failed - set to null')
                         }
-                    )
+                    })
+                    .catch((error) => {
+                        console.error('Initial read failed:', error)
+                        this._data = {} as T
+                    })
             }, 0)
         } else {
             this._data = defaultData
@@ -71,23 +76,26 @@ export class UpdLow<T = unknown> {
         }
     }
 
-
     waitForData(timeoutMs: number = 2000): Promise<void> {
         return new Promise((resolve, reject) => {
-            const startTime = Date.now();
-    
+            const startTime = Date.now()
+
             const checkData = () => {
                 if (this._data !== undefined && this._data !== null) {
-                    resolve(); // Data is ready
+                    resolve() // Data is ready
                 } else if (Date.now() - startTime >= timeoutMs) {
-                    reject(new Error(`Timeout waiting for data to initialize after ${timeoutMs}ms`));
+                    reject(
+                        new Error(
+                            `Timeout waiting for data to initialize after ${timeoutMs}ms`,
+                        ),
+                    )
                 } else {
-                    setTimeout(checkData, 50); // Check again in 50ms
+                    setTimeout(checkData, 50) // Check again in 50ms
                 }
-            };
-    
-            checkData(); // Start first check
-        });
+            }
+
+            checkData() // Start first check
+        })
     }
 
     /**
@@ -95,14 +103,14 @@ export class UpdLow<T = unknown> {
      */
     destroy(): void {
         if (process.env.NODE_ENV === 'test') {
-            console.log('UpdLow is destroyed:');
+            console.log('UpdLow is destroyed:')
         }
         this.stopSmartRefresh()
     }
 
     /**
      * Implements the async disposal pattern
-     * 
+     *
      * @returns A promise that resolves when disposal is complete
      */
     // eslint-disable-next-line @typescript-eslint/require-await
@@ -112,7 +120,7 @@ export class UpdLow<T = unknown> {
 
     /**
      * Gets the current data
-     * 
+     *
      * @returns The current data
      */
     get data(): T {
@@ -121,7 +129,7 @@ export class UpdLow<T = unknown> {
 
     /**
      * Sets new data and marks it as dirty
-     * 
+     *
      * @param value - The new data to set
      */
     set data(value: T) {
@@ -134,7 +142,7 @@ export class UpdLow<T = unknown> {
 
     /**
      * Gets the timestamp of the last local modification
-     * 
+     *
      * @returns The timestamp of the last modification
      */
     get lastMod(): number {
@@ -143,7 +151,7 @@ export class UpdLow<T = unknown> {
 
     /**
      * Gets the timestamp of the last successful data fetch
-     * 
+     *
      * @returns The timestamp of the last fetch
      */
     get lastFetch(): number {
@@ -152,7 +160,7 @@ export class UpdLow<T = unknown> {
 
     /**
      * Reads data from the adapter and updates local data if appropriate
-     * 
+     *
      * @returns A promise that resolves when the read operation is complete
      */
     async read(): Promise<void> {
@@ -182,43 +190,54 @@ export class UpdLow<T = unknown> {
 
     /**
      * Writes the current data to the adapter and resets the dirty state
-     * 
+     *
      * @returns A promise that resolves when the write operation is complete
      */
     async write(): Promise<void> {
-        if (this._data) {
-            await this.adapter.write(this._data)
-            const timestamp = Date.now()
-            this.lastFetched = timestamp
-            this.lastModified = timestamp
-            this.isDirty = false
-            // Restart updates after data is flushed
-            if (this.refreshIntervalMs) {
-                this.startSmartRefresh(this.refreshIntervalMs)
-            }
+        if (!this._data) {
+            return
+        }
+        await this.adapter.write(this._data)
+        const timestamp = Date.now()
+        this.lastFetched = timestamp
+        this.lastModified = timestamp
+        this.isDirty = false
+        // Restart updates after data is flushed
+        if (this.refreshIntervalMs) {
+            this.startSmartRefresh(this.refreshIntervalMs)
         }
     }
 
     /**
      * Updates the data using a provided function and writes if the function returns true
-     * 
+     *
      * @param fn - A function that takes the current data and returns a promise of boolean
      * @returns A promise that resolves to true if the update was successful, false otherwise
      */
-    async update(data: Partial<T>, fn?: (data: Partial<T>) => Promise<{ result: boolean, data: Partial<T> }>): Promise<{ result: boolean, error: string }> {
-        if (data) {
-            if (fn) {
-                try {
-                    const res = await fn(data)
-                    this._data = { ... this._data, ...res.data }
-                    await this.write()
-                    this.isDirty = false
-                    const timestamp = Date.now()
-                    this.lastFetched = timestamp
-                    this.lastModified = timestamp
-                    return { result: true, error: '' }
-                } catch (e: any) {
-                    return { result: true, error: e?.message ?? 'undefined error while update' }
+    async update(
+        data: Partial<T>,
+        fn?: (
+            data: Partial<T>,
+        ) => Promise<{ result: boolean; data: Partial<T> }>,
+    ): Promise<{ result: boolean; error: string }> {
+        if (data && fn) {
+            try {
+                const res = await fn(data)
+                if (!res.result) {
+                    return { result: false, error: 'result of fn is false' }
+                }
+                this._data = { ...this._data, ...res.data }
+                await this.write()
+                this.isDirty = false
+                const timestamp = Date.now()
+                this.lastFetched = timestamp
+                this.lastModified = timestamp
+                return { result: true, error: '' }
+            } catch (e: unknown) {
+                return {
+                    result: true,
+                    error:
+                        (e as Error)?.message ?? 'undefined error while update',
                 }
             }
         }
@@ -227,7 +246,7 @@ export class UpdLow<T = unknown> {
 
     /**
      * Starts the automatic refresh process using cron scheduling
-     * 
+     *
      * @param intervalMs - The interval in milliseconds between updates
      */
     startSmartRefresh(intervalMs: number = this.refreshIntervalMs || 0): void {
@@ -242,7 +261,11 @@ export class UpdLow<T = unknown> {
             // Use arrow function to preserve this context
             const refreshTask = async () => {
                 try {
-                    if (!this._reading && !this.isDirty && this.lastModified <= this.lastFetched) {
+                    if (
+                        !this._reading &&
+                        !this.isDirty &&
+                        this.lastModified <= this.lastFetched
+                    ) {
                         await this.read()
                         if (process.env.NODE_ENV === 'test') {
                             console.log('interval reading:', this._data)

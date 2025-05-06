@@ -1,6 +1,6 @@
 {
-    "name": "elowdb",
-    "version": "7.0.1",
+    "name": "enclowdb",
+    "version": "7.0.2",
     "description": "Tiny local JSON database for Node, Electron and the browser (with optional encoding)",
     "keywords": [
         "database",

@@ -1,9 +1,14 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { PathLike } from 'fs'
-import { defNodeEncrypt, defNodeDecrypt, defNodeEncryptSync, defNodeDecryptSync } from './TextFile.js'
 
 import { DataFile, DataFileSync } from './DataFile.js'
+import {
+    defNodeDecrypt,
+    defNodeDecryptSync,
+    defNodeEncrypt,
+    defNodeEncryptSync,
+} from './TextFile.js'
 
 export class Serializers<T> {
     parse: (str: string) => T = JSON.parse
@@ -17,19 +22,23 @@ export class JSONFile<T> extends DataFile<T> {
         filename: PathLike,
         _cypherKey: string = '',
         options: {
-            serializers?: Serializers<T>,
-            decrypt?: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }>
+            serializers?: Serializers<T>
+            decrypt?: (
+                encryptedText: string,
+                cypherKey: string,
+            ) => Promise<string | { error: string }>
             encrypt?: (
                 text: string,
                 cypherKey: string,
             ) => Promise<string | { error: string }>
-        } = {}
+        } = {},
     ) {
         super(filename, _cypherKey, {
             parse: options?.serializers?.parse || defaultSerializers.parse,
-            stringify: options?.serializers?.stringify || defaultSerializers.stringify,
+            stringify:
+                options?.serializers?.stringify || defaultSerializers.stringify,
             decrypt: options?.decrypt ?? defNodeDecrypt,
-            encrypt: options?.encrypt ?? defNodeEncrypt
+            encrypt: options?.encrypt ?? defNodeEncrypt,
         })
     }
 }
@@ -39,19 +48,23 @@ export class JSONFileSync<T> extends DataFileSync<T> {
         filename: PathLike,
         _cypherKey: string = '',
         options: {
-            serializers?: Serializers<T>,
-            decrypt?: (encryptedText: string, cypherKey: string) => string | { error: string }
+            serializers?: Serializers<T>
+            decrypt?: (
+                encryptedText: string,
+                cypherKey: string,
+            ) => string | { error: string }
             encrypt?: (
                 text: string,
                 cypherKey: string,
             ) => string | { error: string }
-        } = {}
+        } = {},
     ) {
         super(filename, _cypherKey, {
             parse: options?.serializers?.parse || defaultSerializers.parse,
-            stringify: options?.serializers?.stringify || defaultSerializers.stringify,
+            stringify:
+                options?.serializers?.stringify || defaultSerializers.stringify,
             decrypt: options?.decrypt ?? defNodeDecryptSync,
-            encrypt: options?.encrypt ?? defNodeEncryptSync
+            encrypt: options?.encrypt ?? defNodeEncryptSync,
         })
     }
 }

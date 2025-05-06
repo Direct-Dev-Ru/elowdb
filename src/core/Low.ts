@@ -2,9 +2,7 @@ export interface Adapter<T> {
     read: () => Promise<T | null>
     write: (data: T) => Promise<void>
     decrypt?: (secretkey: string) => Promise<string | { error: string }>
-    encrypt?: (
-        secretkey: string,
-    ) => Promise<string | { error: string }>
+    encrypt?: (secretkey: string) => Promise<string | { error: string }>
     // _cypherKey?: string
 }
 
@@ -12,9 +10,7 @@ export interface SyncAdapter<T> {
     read: () => T | null
     write: (data: T) => void
     decrypt?: (secretkey: string) => string | { error: string }
-    encrypt?: (
-        secretkey: string,
-    ) => string | { error: string }
+    encrypt?: (secretkey: string) => string | { error: string }
     // _cypherKey?: string
 }
 
@@ -73,5 +69,3 @@ export class LowSync<T = unknown> {
         this.write()
     }
 }
-
-
