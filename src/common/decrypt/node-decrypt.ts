@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -31,25 +32,32 @@ import * as crypto from 'node:crypto'
 // }
 
 // Function to decrypt the Ansible Vault encrypted data
-export async function decryptStringNodeAnsibleVault(data: string, password: string): Promise<string> {
+export async function decryptStringNodeAnsibleVault(
+    data: string,
+    password: string,
+): Promise<string> {
     if (!data) {
-        return '';
+        return ''
     }
     if (!password) {
-        throw new Error('password is required for decryption');
+        throw new Error('password is required for decryption')
     }
     return decryptStringSyncNodeAnsibleVault(data, password)
 }
 
 // Function to decrypt the Ansible Vault encrypted data
-export function decryptStringSyncNodeAnsibleVault(data: string, password: string): string {
+export function decryptStringSyncNodeAnsibleVault(
+    data: string,
+    password: string,
+): string {
     if (!data) {
-        return '';
+        return ''
     }
     if (!password) {
-        throw new Error('password is required for decryption');
+        throw new Error('password is required for decryption')
     }
     data = replaceCarriageReturn(data)
+
     const body = splitHeader(data)
     const { salt, cryptedHmac, ciphertext } = decodeData(body)
     const { key1, key2, iv } = genKeyInitctr(password, salt)
@@ -66,13 +74,10 @@ export function decryptStringSyncNodeAnsibleVault(data: string, password: string
         .toString()
 }
 
-
-
 // Replace carriage return for Windows line endings
 function replaceCarriageReturn(data: string) {
     // Normalize line endings to \n
-
-    return data.replace(/\r\n/g, '\n');
+    return data.replace(/\r\n/g, '\n')
 }
 
 // Split the header and return the body

@@ -129,8 +129,7 @@ describe('UpdLow class testing with JSONFile', () => {
             expect(result.error).toBe('test error')
         })
 
-        it('should return error if no data provided', async () => {
-            // @ts-expect-error purposely passing undefined
+        it('should return error if no data provided', async () => {            
             const result = await updLow.update(undefined, async () => ({
                 result: true,
                 data: {},

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -21,13 +22,14 @@ export async function encryptStringNodeAnsibleVault(
 ): Promise<string> {
     const strData = inputString
     if (!inputString) {
-        return '';
+        return ''
     }
     if (!password) {
-        throw new Error('password is required for encryption');
+        throw new Error('password is required for encryption')
     }
 
-    return encryptStringSyncNodeAnsibleVault(strData, password, force)
+    const result = encryptStringSyncNodeAnsibleVault(strData, password, force)
+    return result
 }
 
 // Encrypt string data Sync
@@ -38,10 +40,10 @@ export function encryptStringSyncNodeAnsibleVault(
 ): string {
     const strData = inputString
     if (!inputString) {
-        return '';
+        return ''
     }
     if (!password) {
-        throw new Error('password is required for encryption');
+        throw new Error('password is required for encryption')
     }
     // Check if the file is already encrypted
     if (strData.startsWith('$ANSIBLE_VAULT;') && !force) {
@@ -65,7 +67,7 @@ function createCipherText(body: string, key1: any, iv: any): Buffer {
     const bs = 16 // AES block size
     let padding = (bs - (body.length % bs)) % bs
     if (padding === 0) {
-        padding = bs;
+        padding = bs
     }
     const padChar = String.fromCharCode(padding)
     const plaintext = Buffer.concat([

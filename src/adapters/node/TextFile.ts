@@ -4,79 +4,105 @@ import path from 'node:path'
 
 import { Writer } from 'steno'
 
-import { decryptStringNodeAnsibleVault, decryptStringSyncNodeAnsibleVault } from '../../common/decrypt/node-decrypt.js'
-import { encryptStringNodeAnsibleVault, encryptStringSyncNodeAnsibleVault } from '../../common/encrypt/node-encrypt.js'
+import {
+    decryptStringNodeAnsibleVault,
+    decryptStringSyncNodeAnsibleVault,
+} from '../../common/decrypt/node-decrypt.js'
+import {
+    encryptStringNodeAnsibleVault,
+    encryptStringSyncNodeAnsibleVault,
+} from '../../common/encrypt/node-encrypt.js'
 import { Adapter, SyncAdapter } from '../../core/Low.js'
 
-
-
-export const defNodeEncrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
-    if (typeof text !== "string" || typeof cypherKey !== "string") {
-        return { error: "text and cypherKey must be strings" };
+export const defNodeEncrypt = async (
+    text: string,
+    cypherKey: string,
+): Promise<string | { error: string }> => {
+    if (typeof text !== 'string' || typeof cypherKey !== 'string') {
+        return { error: 'text and cypherKey must be strings' }
     }
     if (!cypherKey) return text
     try {
-        const encrypted = await encryptStringNodeAnsibleVault(text, cypherKey);
-        return encrypted;
+        const encrypted = await encryptStringNodeAnsibleVault(text, cypherKey)
+        return encrypted
     } catch (error) {
-        return { error: "Encryption failed" };
+        return { error: 'Encryption failed' }
     }
 }
 
-export const defNodeDecrypt = async (text: string, cypherKey: string): Promise<string | { error: string }> => {
-    if (typeof text !== "string" || typeof cypherKey !== "string") {
-        return { error: "text and cypherKey must be strings" };
+export const defNodeDecrypt = async (
+    text: string,
+    cypherKey: string,
+): Promise<string | { error: string }> => {
+    if (typeof text !== 'string' || typeof cypherKey !== 'string') {
+        return { error: 'text and cypherKey must be strings' }
     }
     if (!cypherKey) return text
     try {
-        const decrypted = await decryptStringNodeAnsibleVault(text, cypherKey);
-        return decrypted;
+        return await decryptStringNodeAnsibleVault(text, cypherKey)
     } catch (error) {
-        return { error: "Decryption failed" };
+        return { error: 'Decryption failed' }
     }
 }
 
-export const defNodeEncryptSync = (text: string, cypherKey: string): string | { error: string } => {
-    if (typeof text !== "string" || typeof cypherKey !== "string") {
-        return { error: "text and cypherKey must be strings" };
+export const defNodeEncryptSync = (
+    text: string,
+    cypherKey: string,
+): string | { error: string } => {
+    if (typeof text !== 'string' || typeof cypherKey !== 'string') {
+        return { error: 'text and cypherKey must be strings' }
     }
     if (!cypherKey) return text
     try {
-        const encrypted = encryptStringSyncNodeAnsibleVault(text, cypherKey);
-        return encrypted;
+        return encryptStringSyncNodeAnsibleVault(text, cypherKey)
     } catch (error) {
-        return { error: "Encryption failed" };
+        return { error: 'Encryption failed' }
     }
 }
 
-export const defNodeDecryptSync = (text: string, cypherKey: string): string | { error: string } => {
-    if (typeof text !== "string" || typeof cypherKey !== "string") {
-        return { error: "text and cypherKey must be strings" };
+export const defNodeDecryptSync = (
+    text: string,
+    cypherKey: string,
+): string | { error: string } => {
+    if (typeof text !== 'string' || typeof cypherKey !== 'string') {
+        return { error: 'text and cypherKey must be strings' }
     }
     if (!cypherKey) return text
     try {
-        const decrypted = decryptStringSyncNodeAnsibleVault(text, cypherKey);
-        return decrypted;
+        const decrypted = decryptStringSyncNodeAnsibleVault(text, cypherKey)
+        return decrypted
     } catch (error) {
-        return { error: "Decryption failed" };
+        return { error: 'Decryption failed' }
     }
 }
-
 
 export class TextFile implements Adapter<string> {
     #filename: PathLike
     #writer: Writer
     _cypherKey?: string | undefined = undefined
-    #decrypt: (text: string, cypherKey: string) => Promise<string | { error: string }>
-    #encrypt: (text: string, cypherKey: string) => Promise<string | { error: string }>
+    #decrypt: (
+        text: string,
+        cypherKey: string,
+    ) => Promise<string | { error: string }>
+    #encrypt: (
+        text: string,
+        cypherKey: string,
+    ) => Promise<string | { error: string }>
 
-    constructor(filename: PathLike, _cypherKey: string = '', options: {
-        decrypt?: (encryptedText: string, cypherKey: string) => Promise<string | { error: string }>
-        encrypt?: (
-            text: string,
-            cypherKey: string,
-        ) => Promise<string | { error: string }>
-    } = {}) {
+    constructor(
+        filename: PathLike,
+        _cypherKey: string = '',
+        options: {
+            decrypt?: (
+                encryptedText: string,
+                cypherKey: string,
+            ) => Promise<string | { error: string }>
+            encrypt?: (
+                text: string,
+                cypherKey: string,
+            ) => Promise<string | { error: string }>
+        } = {},
+    ) {
         this.#filename = filename
         this.#writer = new Writer(filename)
         this._cypherKey = _cypherKey
@@ -116,8 +142,10 @@ export class TextFile implements Adapter<string> {
         if (!this._cypherKey) {
             return this.#writer.write(strDataToWrite)
         }
-        const encryptedData = await this.#encrypt(strDataToWrite, this._cypherKey || '')
-
+        const encryptedData = await this.#encrypt(
+            strDataToWrite,
+            this._cypherKey || '',
+        )
         if (typeof encryptedData !== 'string') {
             const error = encryptedData as { error: string }
             throw new Error(`Encryption failed ${error.error}`)
@@ -130,16 +158,26 @@ export class TextFileSync implements SyncAdapter<string> {
     #tempFilename: PathLike
     #filename: PathLike
     _cypherKey?: string = ''
-    #decrypt: (encryptedText: string, cypherKey: string) => string | { error: string }
+    #decrypt: (
+        encryptedText: string,
+        cypherKey: string,
+    ) => string | { error: string }
     #encrypt: (text: string, cypherKey: string) => string | { error: string }
 
-    constructor(filename: PathLike, _cypherKey: string = '', options: {
-        decrypt?: (encryptedText: string, cypherKey: string) => string | { error: string }
-        encrypt?: (
-            text: string,
-            cypherKey: string,
-        ) => string | { error: string }
-    } = {}) {
+    constructor(
+        filename: PathLike,
+        _cypherKey: string = '',
+        options: {
+            decrypt?: (
+                encryptedText: string,
+                cypherKey: string,
+            ) => string | { error: string }
+            encrypt?: (
+                text: string,
+                cypherKey: string,
+            ) => string | { error: string }
+        } = {},
+    ) {
         this.#filename = filename
         const f = filename.toString()
         this.#tempFilename = path.join(
@@ -150,12 +188,14 @@ export class TextFileSync implements SyncAdapter<string> {
         if (options.decrypt) {
             this.#decrypt = options.decrypt
         } else {
-            this.#decrypt = (data, key) => decryptStringSyncNodeAnsibleVault(data, key)
+            this.#decrypt = (data, key) =>
+                decryptStringSyncNodeAnsibleVault(data, key)
         }
         if (options.encrypt) {
             this.#encrypt = options.encrypt
         } else {
-            this.#encrypt = (data, key) => encryptStringSyncNodeAnsibleVault(data, key)
+            this.#encrypt = (data, key) =>
+                encryptStringSyncNodeAnsibleVault(data, key)
         }
     }
 

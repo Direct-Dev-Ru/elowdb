@@ -69,6 +69,7 @@
         "prepare": "husky install"
     },
     "dependencies": {
+        "@direct-dev-ru/rwmutex-ts": "^1.0.0",
         "@types/node-cron": "^3.0.11",
         "bson": "^6.10.3",
         "deasync": "^0.1.30",

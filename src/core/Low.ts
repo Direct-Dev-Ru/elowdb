@@ -1,9 +1,12 @@
 export interface Adapter<T> {
     read: () => Promise<T | null>
     write: (data: T) => Promise<void>
-    decrypt?: (secretkey: string) => Promise<string | { error: string }>
-    encrypt?: (secretkey: string) => Promise<string | { error: string }>
-    // _cypherKey?: string
+}
+export interface AdapterLine<T> {
+    read: (fn?: (data: T) => boolean) => Promise<T | T[] | { error: string }>
+    write: (data: T | T[]) => Promise<void>
+    delete: (data: T | T[]) => Promise<void>
+    readByData: (data: Partial<T>) => Promise<T | T[] | { error: string }>
 }
 
 export interface SyncAdapter<T> {

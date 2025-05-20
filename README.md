@@ -858,22 +858,22 @@ const db = new Low(adapter, {})
 ```typescript
 import { Low } from 'lowdb'
 import { DataFile } from 'lowdb/node'
-import { gzip, gunzip } from 'zlib'
+import { gzipSync, gunzipSync } from 'zlib'
 import { promisify } from 'util'
 
 const gzipAsync = promisify(gzip)
 const gunzipAsync = promisify(gunzip)
 
-const compressedAdapter = new DataFile('compressed.json', {
-  parse: async (data) => {
-    const decompressed = await gunzipAsync(Buffer.from(data, 'base64'))
-    return JSON.parse(decompressed.toString())
-  },
-  stringify: async (data) => {
-    const compressed = await gzipAsync(JSON.stringify(data))
-    return compressed.toString('base64')
-  }
-})
+const compressedAdapter = new DataFile("compressed.db", undefined, {
+    parse: (data) => {
+      const decompressed = gunzipSync(Buffer.from(data, "base64"));
+      return JSON.parse(decompressed.toString());
+    },
+    stringify: (data) => {
+      const compressed = gzipSync(JSON.stringify(data));
+      return compressed.toString("base64");
+    },
+});
 
 const db = new Low(compressedAdapter, { largeData: '...' })
 await db.write() // Данные будут сжаты при записи

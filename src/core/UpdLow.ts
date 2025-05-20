@@ -215,12 +215,15 @@ export class UpdLow<T = unknown> {
      * @returns A promise that resolves to true if the update was successful, false otherwise
      */
     async update(
-        data: Partial<T>,
+        data?: Partial<T>,
         fn?: (
             data: Partial<T>,
         ) => Promise<{ result: boolean; data: Partial<T> }>,
     ): Promise<{ result: boolean; error: string }> {
-        if (data && fn) {
+        if (!data) {
+            data = this._data
+        }
+        if (fn) {
             try {
                 const res = await fn(data)
                 if (!res.result) {
