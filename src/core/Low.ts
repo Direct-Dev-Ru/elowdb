@@ -5,7 +5,7 @@ export interface Adapter<T> {
 export interface AdapterLine<T> {
     read: (fn?: (data: T) => boolean) => Promise<T | T[] | { error: string }>
     write: (data: T | T[]) => Promise<void>
-    delete: (data: T | T[]) => Promise<void>
+    delete: (data: T | T[]) => Promise<number>
     readByData: (data: Partial<T>) => Promise<T | T[] | { error: string }>
 }
 

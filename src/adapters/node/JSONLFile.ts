@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -22,6 +23,14 @@ import { Writer } from 'steno'
 
 import { AdapterLine } from '../../core/Low.js'
 import { defNodeDecrypt, defNodeEncrypt } from './TextFile.js'
+import { LineDbAdapter } from '../../core/LineDbv2.js'
+
+export interface TransactionOptions {
+    rollback?: boolean
+    mutex?: RWMutex
+    backupFile?: string
+    doNotDeleteBackupFile?: boolean
+}
 
 export class FilePositions {
     private positions: Map<string | number, number[]> = new Map()
@@ -135,7 +144,7 @@ export class FilePositions {
         }, timeoutMs)
     }
 
-    async getPositionByDataNoLock<T extends { id: string | number }>(
+    async getPositionByDataNoLock<T extends LineDbAdapter>(
         data: T,
         idFn?: (data: T) => (string | number)[],
     ): Promise<Map<string | number, number[]>> {
@@ -229,9 +238,8 @@ export class LinePositionsManager {
     }
 }
 
-export class JSONLFile<T extends { id: string | number }>
-    implements AdapterLine<T>
-{
+// export class JSONLFile<T extends { id: string | number }>
+export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     #parse: (str: string) => T
     #stringify: (data: T) => string
     #allocSize: number = 2048
@@ -251,13 +259,13 @@ export class JSONLFile<T extends { id: string | number }>
     #initialized = false
     #inTransactionMode = false
     #idFn: (data: T) => (string | number)[] = (data) => [`byId:${data.id}`]
-    #objName: string
+    #collectionName: string
 
     constructor(
         filename: PathLike,
         _cypherKey: string = '',
         options: {
-            objName?: string
+            collectionName?: string
             decrypt?: (
                 encryptedText: string,
                 cypherKey: string,
@@ -271,7 +279,7 @@ export class JSONLFile<T extends { id: string | number }>
             idFn?: (data: T) => (string | number)[]
         } = {},
     ) {
-        this.#objName = options.objName || filename.toString()
+        this.#collectionName = options.collectionName || filename.toString()
         this.#filename = filename
         this.#cypherKey = _cypherKey
         this.#parse = JSON.parse
@@ -336,15 +344,17 @@ export class JSONLFile<T extends { id: string | number }>
         return this.#filename.toString()
     }
 
+    getCollectionName(): string {
+        return this.#collectionName
+    }
+
     async init(
         force: boolean = false,
         inTransaction: boolean = false,
-        objName?: string,
     ): Promise<void> {
         if (this.#initialized && !force) {
             return
         }
-        this.#objName = objName || this.#filename.toString()
         await this.#ensureFileExists()
         const result = await this.readJsonlFile(undefined, 5000, inTransaction)
         // this.#logTest('result in init', name, result)
@@ -616,7 +626,7 @@ export class JSONLFile<T extends { id: string | number }>
     async delete(
         data: Partial<T> | Partial<T>[],
         inTransaction: boolean = false,
-    ): Promise<void> {
+    ): Promise<number> {
         this.#ensureInitialized()
         const filePositions =
             this.#inTransactionMode || inTransaction
@@ -629,11 +639,14 @@ export class JSONLFile<T extends { id: string | number }>
 
         const dataArray = Array.isArray(data) ? data : [data]
 
-        const payload = async () => {
+        const payload = async (): Promise<number> => {
+            let deletedCount = 0
             for (const item of dataArray) {
                 const positions = await filePositions.getPositionByDataNoLock(
                     item as T,
-                    item?.id ? (data: T) => [`byId:${data.id}`] : this.#idFn,
+                    (item as T)?.id
+                        ? (data: T) => [`byId:${data.id}`]
+                        : this.#idFn,
                 )
 
                 if (positions.size > 0) {
@@ -660,6 +673,7 @@ export class JSONLFile<T extends { id: string | number }>
                                     pos,
                                     -100,
                                 )
+                                deletedCount++
                                 // this.#logTest(
                                 //     'filePositions after',
                                 //     filePositions,
@@ -668,11 +682,13 @@ export class JSONLFile<T extends { id: string | number }>
                             }
                             // this.#logTest('filePositions after', filePositions)
                         }
+                        return deletedCount
                     } finally {
                         await fileHandle.close()
                     }
                 }
             }
+            return deletedCount
         }
         if (this.#inTransactionMode || inTransaction) {
             // запуск без блокировок
@@ -887,7 +903,7 @@ export class JSONLFile<T extends { id: string | number }>
 
     async readByData(
         data: Partial<T>,
-        options?: { strictCompare?: boolean },
+        options?: { strictCompare?: boolean; inTransaction?: boolean },
         inTransaction: boolean = false,
     ): Promise<T[]> {
         this.#ensureInitialized()
@@ -910,7 +926,7 @@ export class JSONLFile<T extends { id: string | number }>
         const allRecords = await this.readJsonlFile(
             undefined,
             5000,
-            this.#inTransactionMode || inTransaction,
+            this.#inTransactionMode || options?.inTransaction,
         )
         if (!Array.isArray(allRecords)) {
             throw new Error(allRecords.error)
@@ -940,12 +956,7 @@ export class JSONLFile<T extends { id: string | number }>
 
     async withTransaction(
         fn: (adapter: JSONLFile<T>) => Promise<unknown>,
-        options: {
-            rollback?: boolean
-            mutex?: RWMutex
-            backupFile?: string
-            doNotDeleteBackupFile?: boolean
-        } = {},
+        options: TransactionOptions = {},
     ): Promise<void> {
         const filePositions = await LinePositionsManager.getFilePositions(
             this.#filename.toString(),
@@ -1023,7 +1034,7 @@ export class JSONLFile<T extends { id: string | number }>
                 throw new Error(
                     `error in transaction mode. rollback: ${
                         options?.rollback ? 'done' : 'not done'
-                    }. ${this.#objName}: ${err}`,
+                    }. ${this.#collectionName}: ${err}`,
                 )
             }
         } catch (err) {
@@ -1042,7 +1053,7 @@ export class JSONLFile<T extends { id: string | number }>
             throw new Error(
                 `error in transaction mode. rollback: ${
                     options?.rollback ? 'done' : 'not done'
-                }. ${this.#objName}: ${err}`,
+                }. ${this.#collectionName}: ${err}`,
             )
         } finally {
             this.#inTransactionMode = false

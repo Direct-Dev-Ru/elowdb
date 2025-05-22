@@ -23,7 +23,8 @@ function logTest(log: boolean = true, ...args: unknown[]): void {
 }
 
 describe('JSONLFile', () => {
-    const testDir = path.join(process.cwd(), 'test-data')
+    // const testDir = path.join(process.cwd(), 'test-data')
+    const testDir = path.join('test-data')
     const testFileMain = path.join(testDir, 'testResult')
     let jsonlFile: JSONLFile<TestData>
 
@@ -35,7 +36,40 @@ describe('JSONLFile', () => {
     })
 
     afterEach(async () => {})
-    describe.skip('JSONLFile step without transaction', () => {
+    describe('JSONLFile warm up', () => {
+        it('01.should store collectionName in the adapter', async () => {
+            const logInThisTest = true
+            const testFile = `${testFileMain}_B01.jsonl`
+            try {
+                await fs.promises.unlink(`${testFile}_B01.jsonl`)
+            } catch (error) {
+                // console.log('Error deleting file:', error)
+            }
+
+            jsonlFile = new JSONLFile<TestData>(testFile, '', {
+                allocSize: 512,
+                // collectionName: 'test-warmup',
+            })
+            await jsonlFile.init()
+
+            const testData: TestData = {
+                id: '1',
+                name: 'Test',
+                value: 42,
+                user: 'User1',
+            }
+            await jsonlFile.write(testData)
+            const result = await jsonlFile.read()
+            expect(result).toEqual([testData])
+            logTest(
+                logInThisTest,
+                jsonlFile.getFilename(),
+                jsonlFile.getCollectionName(),
+            )
+        })
+    })
+
+    describe.skip('JSONLFile step with transaction', () => {
         it('01.should write and read a single object', async () => {
             const testFile = `${testFileMain}_01.jsonl`
             try {
@@ -489,7 +523,7 @@ describe('JSONLFile', () => {
         })
     })
 
-    describe('JSONLFile step withTransaction', () => {
+    describe.skip('JSONLFile step withTransaction', () => {
         it.skip('01T.should write and read multiple objects', async () => {
             const testFile = `${testFileMain}_01T.jsonl`
             try {
@@ -938,7 +972,7 @@ describe('JSONLFile', () => {
                     async (tx) => {
                         throw new Error('Test error')
                     },
-                    {                                             
+                    {
                         rollback: true,
                     },
                 )

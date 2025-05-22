@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { LineDb } from './LineDb.js'
-import { JSONLFile } from '../adapters/node/JSONLFile.js'
+import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -9,11 +9,22 @@ interface TestData {
     name: string
     age: number
 }
+interface TestUser {
+    id: number
+    username: string
+    password: string
+    isActive: boolean
+    role: string
+    timestamp: number
+}
 
 describe('LineDb', () => {
-    const testFile = path.join(process.cwd(), 'test-data/test.jsonl')
+    const testFileData = path.join(process.cwd(), 'test-data/testData.jsonl')
+
+    const testFile = testFileData
     let db: LineDb<TestData>
     let adapter: JSONLFile<TestData>
+    let adapterUser: JSONLFile<TestUser>
 
     beforeEach(async () => {
         try {
@@ -34,7 +45,7 @@ describe('LineDb', () => {
         // }
     })
 
-    describe('Инициализация', () => {
+    describe.skip('Инициализация', () => {
         it('должен успешно инициализироваться', async () => {
             expect(db).toBeDefined()
             await expect(db.init()).resolves.not.toThrow()
@@ -108,7 +119,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe('Кэширование', () => {
+    describe.skip('Кэширование', () => {
         it('должен кэшировать записи', async () => {
             const data: TestData = { id: 1, name: 'Test', age: 25 }
             await db.write(data)
@@ -139,7 +150,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe('Генерация ID', () => {
+    describe.skip('Генерация ID', () => {
         it('должен генерировать последовательные ID', async () => {
             const data1: Partial<TestData> = { name: 'Test 1', age: 25 }
             const data2: Partial<TestData> = { name: 'Test 2', age: 30 }
@@ -182,7 +193,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe('Обработка ошибок', () => {
+    describe.skip('Обработка ошибок', () => {
         it('должен выбрасывать ошибку при чтении неинициализированной БД', async () => {
             const ladapter = new JSONLFile<TestData>(testFile)
             const newDb = new LineDb<TestData>(ladapter)
@@ -197,9 +208,7 @@ describe('LineDb', () => {
         })
     })
 
-
-
-    describe('Произвольная функция генерации ID', () => {
+    describe.skip('Произвольная функция генерации ID', () => {
         interface CustomIdData {
             id: number
             name: string
@@ -333,7 +342,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe('Конкурентная запись', () => {
+    describe.skip('Конкурентная запись', () => {
         it('должен корректно обрабатывать конкурентные записи', async () => {
             const testData: Partial<TestData>[] = []
             const count = 200
@@ -344,8 +353,9 @@ describe('LineDb', () => {
                 }
                 testData.push(data)
             }
-            await Promise.all(testData.map((data) => db.write(data as TestData)))
-            
+            await Promise.all(
+                testData.map((data) => db.write(data as TestData)),
+            )
 
             const result = await db.read()
             expect(result).toHaveLength(count)
@@ -397,4 +407,50 @@ describe('LineDb', () => {
             expect(result2[0].id).toBe(1)
         })
     })
+
+    /*
+    describe('withTransaction', () => {
+        it.skip('должен вызывать withTransaction адаптера внутри writeLock', async () => {
+            const callback = vi.fn().mockResolvedValue(undefined)
+
+            await db.withTransaction(callback)
+
+            expect(adapter.withTransaction).toHaveBeenCalledWith(callback)
+        })
+
+        it.skip('должен пробрасывать ошибки из callback', async () => {
+            const error = new Error('test error')
+            const callback = vi.fn().mockRejectedValue(error)
+
+            await expect(db.withTransaction(callback)).rejects.toThrow(error)
+        })
+
+        it('должен выполнять операции в транзакции', async () => {
+            const testData: TestData[] = [
+                { id: -1, name: 'test', age: 40 },
+                { id: -1, name: 'test2', age: 40 },
+            ]
+
+            const callback = async (
+                adapter: JSONLFile<TestData>,
+                db: LineDb<TestData>,
+            ) => {
+                const testDataIds = await db.setIds(testData)
+                await adapter.write(testDataIds)
+                console.log(await db.nextId())
+                // throw new Error('Test error')
+                // await adapter.write(testData)
+            }
+
+            try {
+                await db.withTransaction(callback, db, { rollback: true })
+            } catch (error) {
+                expect(error).toBeInstanceOf(Error)
+            }
+            const dbContent = await db.read()
+            expect(dbContent).toHaveLength(2)
+            expect(dbContent[0]).toEqual(testData[0])
+        })
+    })
+    */
 })

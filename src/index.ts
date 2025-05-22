@@ -1,5 +1,5 @@
 // Core classes
-export { LineDb } from './core/LineDb.js'
+export { LineDb } from './core/LineDbv2.js'
 export { Low } from './core/Low.js'
 export { LowSync } from './core/Low.js'
 export { LowWithLodash } from './core/LowWithLodash.js'
