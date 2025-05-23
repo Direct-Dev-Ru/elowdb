@@ -8,7 +8,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 
-import { log } from 'node:console'
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createReadStream } from 'node:fs'
@@ -19,11 +18,10 @@ import readline from 'node:readline'
 import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 import { PathLike } from 'fs'
 import path from 'path'
-import { Writer } from 'steno'
 
+import { LineDbAdapter } from '../../core/LineDbv2.js'
 import { AdapterLine } from '../../core/Low.js'
 import { defNodeDecrypt, defNodeEncrypt } from './TextFile.js'
-import { LineDbAdapter } from '../../core/LineDbv2.js'
 
 export interface TransactionOptions {
     rollback?: boolean
@@ -260,6 +258,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     #inTransactionMode = false
     #idFn: (data: T) => (string | number)[] = (data) => [`byId:${data.id}`]
     #collectionName: string
+    #hashFilename: string
 
     constructor(
         filename: PathLike,
@@ -279,7 +278,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             idFn?: (data: T) => (string | number)[]
         } = {},
     ) {
-        this.#collectionName = options.collectionName || filename.toString()
+        this.#hashFilename = crypto
+            .createHash('sha256')
+            .update(filename.toString())
+            .digest('hex')
+        this.#collectionName = options.collectionName || this.#hashFilename
         this.#filename = filename
         this.#cypherKey = _cypherKey
         this.#parse = JSON.parse
@@ -338,6 +341,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     : [`byId:${data.id}`]
             }
         }
+    }
+
+    get allocSize(): number {
+        return this.#allocSize
     }
 
     getFilename(): string {

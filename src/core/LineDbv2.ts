@@ -1,6 +1,15 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/require-await */
+import crypto from 'node:crypto'
+import fsClassic from 'node:fs'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
 import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 import { chain, CollectionChain } from 'lodash'
 
@@ -471,15 +480,39 @@ export class LineDb {
         return await this.#mutex.withWriteLock(payload)
     }
 
+    async clearCache(collectionName?: string): Promise<void> {
+        if (collectionName) {
+            for (const [key, entry] of this.#cache.entries()) {
+                if (entry.collectionName === collectionName) {
+                    this.#cache.delete(key)
+                }
+            }
+        } else {
+            this.#cache.clear()
+        }
+    }
+
+    async #getCacheStats(): Promise<{
+        hits: number
+        misses: number
+        size: number
+        hitRate: number
+    }> {
+        const hits = 0
+        const misses = 0
+        const size = this.#cache.size
+        const hitRate = size > 0 ? hits / size : 0
+
+        return { hits, misses, size, hitRate }
+    }
+
     #updateCache<T extends LineDbAdapter>(
         item: T,
         collectionName: string,
-        options: { inTransaction: boolean } = { inTransaction: false },
+        // options: { inTransaction: boolean } = { inTransaction: false },
     ): void {
         const now = Date.now()
         const cacheKey = `${collectionName}:${item.id}`
-
-        logTest('options in #updatecache', options)
 
         // Если запись с таким ID уже есть в кэше, проверяем её актуальность
         if (this.#cache.has(cacheKey)) {
@@ -606,25 +639,6 @@ export class LineDb {
     ): Promise<CollectionChain<T>> {
         const results = await this.readByData(data, collectionName, options)
         return chain(results)
-    }
-
-    async withTransaction<T extends LineDbAdapter>(
-        callback: (adapter: JSONLFile<T>, db: LineDb) => Promise<unknown>,
-        collectionName?: string,
-        options: TransactionOptions = { rollback: true },
-    ): Promise<unknown> {
-        if (!collectionName) {
-            collectionName = this.firstCollection
-        }
-        const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
-        if (!adapter) {
-            throw new Error(`Collection ${collectionName} not found`)
-        }
-
-        const closure = async (adapter: JSONLFile<T>) => {
-            return await callback(adapter, this)
-        }
-        return await adapter.withTransaction(closure, options)
     }
 
     /**
@@ -791,6 +805,324 @@ export class LineDb {
         }
 
         return chain(result)
+    }
+
+    async withAdapterTransaction<T extends LineDbAdapter>(
+        callback: (adapter: JSONLFile<T>, db: LineDb) => Promise<unknown>,
+        collectionName?: string,
+        options: TransactionOptions = { rollback: true },
+    ): Promise<unknown> {
+        if (!collectionName) {
+            collectionName = this.firstCollection
+        }
+        const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
+        if (!adapter) {
+            throw new Error(`Collection ${collectionName} not found`)
+        }
+
+        const closure = async (adapter: JSONLFile<T>) => {
+            return await callback(adapter, this)
+        }
+        return await adapter.withTransaction(closure, options)
+    }
+
+    // async withDbTransaction(
+    //     callback: (db: LineDb) => Promise<unknown>,
+    //     collectionNames: string[],
+    //     options: TransactionOptions = {},
+    // ): Promise<void> {
+    //     const mutexLocal = options?.mutex || globalLineDbMutex
+    //     this.#inTransaction = true
+
+    //     if (!('rollback' in options)) {
+    //         options.rollback = true
+    //     }
+    //     if (!('backupFile' in options)) {
+    //         options.backupFile = undefined
+    //     }
+    //     if (!('doNotDeleteBackupFile' in options)) {
+    //         options.doNotDeleteBackupFile = false
+    //     }
+
+    //     // Создаем временный файл для бэкапа в системной папке для временных файлов
+    //     const tmpDir = os.tmpdir()
+    //     // Генерируем случайный идентификатор для уникальности имени файла
+    //     const entropy = crypto.randomBytes(8).toString('hex')
+    //     const backupFile =
+    //         options?.backupFile ||
+    //         path.join(tmpDir, `elinedb-${entropy}-${Date.now()}.backup`)
+    //     let backupCreated = false
+
+    //     const positionsBackup = new Map<string | number, number[]>()
+    //     try {
+    //         try {
+    //             return await mutexLocal.withWriteLock(async () => {
+    //                 if (options?.rollback) {
+    //                     // Сохраняем текущее состояние файла
+    //                     try {
+    //                         await fs.copyFile(
+    //                             this.#filename.toString(),
+    //                             backupFile,
+    //                         )
+    //                         // Создаем глубокую копию карты позиций
+    //                         for (const [
+    //                             key,
+    //                             positions,
+    //                         ] of await filePositions.getAllPositionsNoLock()) {
+    //                             positionsBackup.set(key, [...positions])
+    //                         }
+    //                         backupCreated = true
+    //                     } catch (err) {
+    //                         // Если файл не существует, это нормально для новой БД
+    //                         if (
+    //                             (err as NodeJS.ErrnoException).code !== 'ENOENT'
+    //                         ) {
+    //                             throw err
+    //                         }
+    //                     }
+    //                 }
+    //                 // вызов функции полезной функции
+    //                 await fn(this)
+    //             })
+    //         } catch (err) {
+    //             if (options?.rollback) {
+    //                 // Восстанавливаем состояние filePositions
+    //                 try {
+    //                     await filePositions.setAllPositionsNoLock(
+    //                         positionsBackup,
+    //                     )
+    //                 } catch (restoreErr) {
+    //                     throw new Error(
+    //                         `Failed to restore filePositions: ${restoreErr}. Original error: ${err}`,
+    //                     )
+    //                 }
+    //             }
+    //             throw new Error(
+    //                 `error in transaction mode. rollback: ${
+    //                     options?.rollback ? 'done' : 'not done'
+    //                 }. ${this.#collectionName}: ${err}`,
+    //             )
+    //         }
+    //     } catch (err) {
+    //         // Восстанавливаем состояние из бэкапа при ошибке
+    //         if (backupCreated && options?.rollback) {
+    //             try {
+    //                 await fs.copyFile(backupFile, this.#filename.toString())
+    //                 // await fs.copyFile(backupFile, '/tmp/elinedb-error.err')
+    //             } catch (restoreErr) {
+    //                 throw new Error(
+    //                     `Failed to restore from backup: ${restoreErr}. Original error: ${err}`,
+    //                 )
+    //             }
+    //         }
+
+    //         throw new Error(
+    //             `error in transaction mode. rollback: ${
+    //                 options?.rollback ? 'done' : 'not done'
+    //             }. ${this.#collectionName}: ${err}`,
+    //         )
+    //     } finally {
+    //         this.#inTransactionMode = false
+
+    //         // Удаляем временный файл
+    //         if (
+    //             backupCreated &&
+    //             options?.rollback &&
+    //             !options?.doNotDeleteBackupFile
+    //         ) {
+    //             try {
+    //                 await fs.unlink(backupFile)
+    //             } catch (unlinkErr) {
+    //                 // Логируем ошибку удаления, но не прерываем выполнение
+    //                 console.error(`Failed to remove backup file: ${unlinkErr}`)
+    //             }
+    //         }
+    //     }
+    // }
+
+    async createBackup(
+        outputFile?: string,
+        collectionNames?: string[],
+    ): Promise<void> {
+        if (!outputFile) {
+            const backupFolder = path.join(process.cwd(), 'elinedb-backups')
+            if (!fsClassic.existsSync(backupFolder)) {
+                await fs.mkdir(backupFolder, { recursive: true })
+            }
+            const entropy = crypto.randomBytes(8).toString('hex')
+            outputFile = path.join(
+                os.tmpdir(),
+                `elinedb-${entropy}-${Date.now()}.backup`,
+            )
+        }
+        const mutexLocal = this.#mutex
+        return await mutexLocal.withReadLock(async () => {
+            const backupContent: string[] = []
+
+            // Собираем данные из всех коллекций
+            for (const [collectionName, adapter] of this.#adapters) {
+                if (
+                    collectionNames &&
+                    !collectionNames.includes(collectionName)
+                ) {
+                    continue
+                }
+                const data = await (adapter as JSONLFile<LineDbAdapter>).read()
+
+                // Добавляем разделитель и имя коллекции
+                backupContent.push(
+                    `===${collectionName}:${(
+                        adapter as JSONLFile<LineDbAdapter>
+                    ).getFilename()}===`,
+                )
+
+                // Добавляем данные коллекции
+                for (const item of data) {
+                    backupContent.push(JSON.stringify(item))
+                }
+
+                // Добавляем разделитель
+                backupContent.push('=====================')
+            }
+
+            // Записываем в файл
+            await fs.writeFile(outputFile, backupContent.join('\n'), 'utf-8')
+        })
+    }
+
+    async restoreFromBackup(
+        backupFile: string,
+    ): Promise<{ error: string } | void> {
+        const mutexLocal = this.#mutex
+        try {
+            await mutexLocal.withWriteLock(async () => {
+                // Читаем содержимое бэкапа
+                const content = await fs.readFile(backupFile, 'utf-8')
+                const lines = content.split('\n')
+
+                let currentCollection: string | null = null
+                let currentFilename: string | null = null
+                let currentData: string[] = []
+
+                // Обрабатываем каждую строку
+                for (const line of lines) {
+                    // Проверяем, является ли строка разделителем коллекции
+                    if (line.startsWith('===') && line.endsWith('===')) {
+                        // Если у нас есть данные предыдущей коллекции, сохраняем их
+                        if (
+                            currentCollection &&
+                            currentFilename &&
+                            currentData.length > 0
+                        ) {
+                            const adapter = this.#adapters.get(
+                                currentCollection,
+                            ) as JSONLFile<LineDbAdapter>
+                            if (!adapter) {
+                                throw new Error(
+                                    `Collection ${currentCollection} not found during restore`,
+                                )
+                            }
+
+                            // Дополняем каждую строку пробелами до размера allocSize
+                            const paddedData = currentData
+                                .filter((line) => line.trim())
+                                .map((line) => {
+                                    const padding = ' '.repeat(
+                                        Math.max(
+                                            0,
+                                            adapter.allocSize - line.length - 1,
+                                        ),
+                                    )
+                                    return line + padding
+                                })
+                                .join('\n')
+
+                            // Записываем данные в файл
+                            await fs.writeFile(
+                                currentFilename,
+                                `${paddedData}\n`,
+                                'utf-8',
+                            )
+
+                            // Переинициализируем адаптер
+                            // await adapter.init(true)
+
+                            // Очищаем кэш для этой коллекции
+                            await this.clearCache(currentCollection)
+
+                            currentData = []
+                        }
+
+                        // Извлекаем имя коллекции и файла
+                        const current = line.slice(3, -3)
+                        currentCollection = current.split(':')[0]
+                        currentFilename = current.split(':')[1]
+                        continue
+                    }
+
+                    // Пропускаем разделители между коллекциями
+                    if (line === '=====================') {
+                        continue
+                    }
+
+                    // Если у нас есть текущая коллекция, добавляем строку
+                    if (currentCollection) {
+                        currentData.push(line)
+                    }
+                }
+
+                // Сохраняем данные последней коллекции
+                if (
+                    currentCollection &&
+                    currentFilename &&
+                    currentData.length > 0
+                ) {
+                    const adapter = this.#adapters.get(
+                        currentCollection,
+                    ) as JSONLFile<LineDbAdapter>
+                    if (!adapter) {
+                        throw new Error(
+                            `Collection ${currentCollection} not found during restore`,
+                        )
+                    }
+
+                    // Дополняем каждую строку пробелами до размера allocSize
+                    const paddedData = currentData
+                        .filter((line) => line.trim())
+                        .map((line) => {
+                            const padding = ' '.repeat(
+                                Math.max(
+                                    0,
+                                    adapter.allocSize - line.length - 1,
+                                ),
+                            )
+                            return line + padding
+                        })
+                        .join('\n')
+
+                    // Записываем данные в файл
+                    await fs.writeFile(
+                        currentFilename,
+                        `${paddedData}\n`,
+                        'utf-8',
+                    )
+
+                    // Переинициализируем адаптер
+                    // await adapter.init(true)
+
+                    // Очищаем кэш для этой коллекции
+                    await this.clearCache(currentCollection)
+                }
+            })
+            return await this.init(true)
+        } catch (error) {
+            // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+            return {
+                error: `Error restoring from backup: ${
+                    (error as Error).message
+                }`,
+            }
+        }
     }
 }
 
