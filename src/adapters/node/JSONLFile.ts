@@ -17,223 +17,37 @@ import readline from 'node:readline'
 
 import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 import { PathLike } from 'fs'
+import { cloneDeep } from 'lodash'
 import path from 'path'
 
 import { LineDbAdapter } from '../../core/LineDbv2.js'
 import { AdapterLine } from '../../core/Low.js'
 import { defNodeDecrypt, defNodeEncrypt } from './TextFile.js'
-
 export interface TransactionOptions {
     rollback?: boolean
     mutex?: RWMutex
     backupFile?: string
     doNotDeleteBackupFile?: boolean
 }
+import {
+    FilePosition,
+    LinePositionsManager,
+} from '../../common/positions/position.js'
 
-export class FilePositions {
-    private positions: Map<string | number, number[]> = new Map()
-    private mutex = new RWMutex()
-
-    getMutex(): RWMutex {
-        return this.mutex
-    }
-
-    async getPosition(id: string | number): Promise<number[] | undefined> {
-        return await this.mutex.withReadLock(async () => {
-            return this.positions.get(id)
-        })
-    }
-
-    async getPositionNoLock(
-        id: string | number,
-    ): Promise<number[] | undefined> {
-        return this.positions.get(id)
-    }
-
-    async setPosition(id: string | number, position: number): Promise<void> {
-        await this.mutex.withWriteLock(async () => {
-            const positions = this.positions.get(id) || []
-            positions.push(position)
-            this.positions.set(id, positions)
-        })
-    }
-
-    async setPositionNoLock(
-        id: string | number,
-        position: number,
-    ): Promise<void> {
-        const positions = this.positions.get(id) || []
-        positions.push(position)
-        this.positions.set(id, positions)
-    }
-
-    async replacePositionNoLock(
-        oldPosition: number,
-        newPosition: number,
-    ): Promise<void> {
-        // Проходим по всем записям в карте
-        for (const [currentId, positions] of this.positions.entries()) {
-            const index = positions.indexOf(oldPosition)
-            if (index !== -1) {
-                positions[index] = newPosition
-                this.positions.set(currentId, positions)
-            }
-        }
-    }
-    async replacePosition(
-        id: string | number,
-        oldPosition: number,
-        newPosition: number,
-    ): Promise<void> {
-        await this.mutex.withWriteLock(async () => {
-            await this.replacePositionNoLock(oldPosition, newPosition)
-        })
-    }
-
-    async clear(): Promise<void> {
-        await this.mutex.withWriteLock(async () => {
-            this.positions.clear()
-        })
-    }
-
-    async clearNoLock(): Promise<void> {
-        this.positions.clear()
-    }
-
-    async getAllPositions(): Promise<Map<string | number, number[]>> {
-        return await this.mutex.withReadLock(async () => {
-            return this.positions
-        })
-    }
-
-    async getAllPositionsNoLock(): Promise<Map<string | number, number[]>> {
-        return this.positions
-    }
-
-    async setAllPositions(
-        positions: Map<string | number, number[]>,
-    ): Promise<void> {
-        await this.mutex.withWriteLock(async () => {
-            this.positions = positions
-        })
-    }
-
-    async setAllPositionsNoLock(
-        positions: Map<string | number, number[]>,
-    ): Promise<void> {
-        this.positions = positions
-    }
-
-    async getPositionByData<T extends { id: string | number }>(
-        data: T,
-        timeoutMs?: number,
-        idFn?: (data: T) => (string | number)[],
-    ): Promise<Map<string | number, number[]>> {
-        return await this.mutex.withReadLock(async () => {
-            const ids = idFn ? idFn(data) : [`byId:${data.id}`]
-            const result = new Map<string | number, number[]>()
-            for (const id of ids) {
-                const positions = this.positions.get(id)
-                if (positions) {
-                    result.set(id, positions)
-                }
-            }
-            return result
-        }, timeoutMs)
-    }
-
-    async getPositionByDataNoLock<T extends LineDbAdapter>(
-        data: T,
-        idFn?: (data: T) => (string | number)[],
-    ): Promise<Map<string | number, number[]>> {
-        const ids = idFn ? idFn(data) : [`byId:${data.id}`]
-        const result = new Map<string | number, number[]>()
-        for (const id of ids) {
-            const positions = this.positions.get(id)
-            if (positions) {
-                result.set(id, positions)
-            }
-        }
-        return result
-    }
-
-    async setPositionByData<T extends { id: string | number }>(
-        data: T,
-        position: number,
-        timeoutMs?: number,
-        idFn?: (data: T) => (string | number)[],
-    ): Promise<void> {
-        await this.mutex.withWriteLock(async () => {
-            const ids = idFn ? idFn(data) : [`byId:${data.id}`]
-            for (const id of ids) {
-                const positions = this.positions.get(id) || []
-                if (!positions.includes(position)) {
-                    positions.push(position)
-                    this.positions.set(id, positions)
-                }
-            }
-        }, timeoutMs)
-    }
-
-    async setPositionByDataNoLock<T extends { id: string | number }>(
-        data: T,
-        position: number,
-        idFn?: (data: T) => (string | number)[],
-    ): Promise<void> {
-        const ids = idFn ? idFn(data) : [`byId:${data.id}`]
-        for (const id of ids) {
-            const positions = this.positions.get(id) || []
-            if (!positions.includes(position)) {
-                positions.push(position)
-                this.positions.set(id, positions)
-            }
-        }
-    }
-}
-
-export class LinePositionsManager {
-    private static globalMutex = new RWMutex()
-    private static filePositions: Map<string, FilePositions> = new Map()
-
-    private constructor() {}
-
-    static async getFilePositions(filename: string): Promise<FilePositions> {
-        return await this.globalMutex.withReadLock(async () => {
-            if (!this.filePositions.has(filename)) {
-                this.filePositions.set(filename, new FilePositions())
-            }
-            return this.filePositions.get(filename)!
-        })
-    }
-
-    static async getFilePositionsNoLock(
-        filename: string,
-    ): Promise<FilePositions> {
-        if (!this.filePositions.has(filename)) {
-            this.filePositions.set(filename, new FilePositions())
-        }
-        return this.filePositions.get(filename)!
-    }
-
-    static async clearFilePositions(filename: string): Promise<void> {
-        const filePos = await this.getFilePositions(filename)
-        await filePos.clear()
-    }
-
-    static async clearFilePositionsNoLock(filename: string): Promise<void> {
-        const filePos = await this.getFilePositionsNoLock(filename)
-        return filePos.clearNoLock()
-    }
-
-    static async removeFile(filename: string): Promise<void> {
-        await this.globalMutex.withWriteLock(async () => {
-            this.filePositions.delete(filename)
-        })
-    }
-
-    static async removeFileNoLock(filename: string): Promise<void> {
-        this.filePositions.delete(filename)
-    }
+type JSONLFileOptions<T> = {
+    collectionName?: string
+    decrypt?: (
+        encryptedText: string,
+        cypherKey: string,
+    ) => Promise<string | { error: string }>
+    encrypt?: (
+        text: string,
+        cypherKey: string,
+    ) => Promise<string | { error: string }>
+    allocSize?: number
+    idFn?: (data: T) => (string | number)[]
+    decryptKey?: string // This key will be used to decrypt the file and stay it unencrypted (_cypherKey is null)
+    skipInvalidLines?: boolean
 }
 
 // export class JSONLFile<T extends { id: string | number }>
@@ -259,25 +73,14 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     #idFn: (data: T) => (string | number)[] = (data) => [`byId:${data.id}`]
     #collectionName: string
     #hashFilename: string
+    #constructorOptions: JSONLFileOptions<T> = {}
 
     constructor(
         filename: PathLike,
         _cypherKey: string = '',
-        options: {
-            collectionName?: string
-            decrypt?: (
-                encryptedText: string,
-                cypherKey: string,
-            ) => Promise<string | { error: string }>
-            encrypt?: (
-                text: string,
-                cypherKey: string,
-            ) => Promise<string | { error: string }>
-            allocSize?: number
-            padding?: number
-            idFn?: (data: T) => (string | number)[]
-        } = {},
+        options: JSONLFileOptions<T> = {},
     ) {
+        this.#constructorOptions = options
         this.#hashFilename = crypto
             .createHash('sha256')
             .update(filename.toString())
@@ -290,9 +93,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         if (options.allocSize) {
             this.#allocSize = options.allocSize
         }
-        if (options.padding) {
-            this.#padding = options.padding
-        }
+
         let _decrypt = defNodeDecrypt
         let _encrypt = defNodeEncrypt
         if (options.decrypt) {
@@ -362,13 +163,37 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         if (this.#initialized && !force) {
             return
         }
+        this.#initialized = false
         await this.#ensureFileExists()
         const result = await this.readJsonlFile(undefined, 5000, inTransaction)
         // this.#logTest('result in init', name, result)
         if (typeof result === 'object' && 'error' in result) {
-            await this.#compressFile(inTransaction) // проводим сжатие файла
-            // обновляем индекс
-            await this.readJsonlFile(undefined, 5000, inTransaction)
+            if (result.error === 'need rewrite file' && result?.result) {
+                this.#initialized = true
+                const filePositions =
+                    this.#inTransactionMode || inTransaction
+                        ? await LinePositionsManager.getFilePositionsNoLock(
+                              this.#filename.toString(),
+                          )
+                        : await LinePositionsManager.getFilePositions(
+                              this.#filename.toString(),
+                          )
+                if (inTransaction) {
+                    await filePositions.clearNoLock()
+                } else {
+                    await filePositions.clear()
+                }
+                await fs.writeFile(this.#filename, '')
+                await this.write(result.result, inTransaction)
+                // await this.readJsonlFile(undefined, 5000, inTransaction)
+                this.#logTest('filePositions in init', filePositions)
+            } else if (result.error === 'need compress file') {
+                await this.#compressFile(inTransaction) // проводим сжатие файла
+                // обновляем индекс
+                await this.readJsonlFile(undefined, 5000, inTransaction)
+            } else {
+                throw new Error(result.error)
+            }
         }
         this.#initialized = true
     }
@@ -497,17 +322,24 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     }
 
     async #readRecords(
-        positions: Map<string | number, number[]>,
+        positions: Map<string | number, (number | FilePosition)[]>,
     ): Promise<T[]> {
         const result: T[] = []
         const fileHandle = await fs.open(this.#filename, 'r')
         try {
             for (const [_, posArray] of positions) {
                 for (const pos of posArray) {
-                    if (pos < 0) continue // Пропускаем удаленные записи
+                    const readPosition =
+                        pos instanceof FilePosition ? pos.position : pos
+                    if (readPosition < 0) continue // Пропускаем удаленные записи
 
                     const buffer = Buffer.alloc(this.#allocSize)
-                    await fileHandle.read(buffer, 0, this.#allocSize, pos)
+                    await fileHandle.read(
+                        buffer,
+                        0,
+                        this.#allocSize,
+                        readPosition,
+                    )
                     const line = buffer.toString().trim()
 
                     if (line.length === 0) continue
@@ -542,10 +374,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         fn?: (data: T) => boolean,
         timeoutMs: number = 1000,
         inTransaction: boolean = false,
-    ): Promise<T[] | { error: string }> {
+    ): Promise<T[] | { error: string; result?: T[] }> {
         const result: T[] = []
         let position = 0
-
+        let needRewrite = false
         const fileStream = createReadStream(this.#filename)
 
         const rl = readline.createInterface({
@@ -570,26 +402,90 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             }
             for await (const line of rl) {
                 let lineData = line.trim()
-                if (lineData.length === 0) {
+                let obj: T = { id: 'invalid_id' } as T
+                // если инициализация и пустая строка, то возврат ошибки, чтобы сжать файл
+                if (lineData.length === 0 && !this.#initialized) {
                     this.$hasDeletedRecords = true
                     return { error: 'need compress file' }
                 }
                 try {
-                    // расшифровываем если нужно
+                    // если указан ключ шифрования, то пробуем расшифровать
                     if (this.#cypherKey) {
-                        const decrypted = await this.#decrypt(
-                            lineData,
-                            this.#cypherKey,
-                        )
-                        if (typeof lineData !== 'string') {
+                        try {
+                            // Пробуем расшифровать
+                            const decrypted = await this.#decrypt(
+                                lineData,
+                                this.#cypherKey,
+                            )
+                            if (typeof decrypted === 'string') {
+                                lineData = decrypted
+                            } else {
+                                // Если расшифровка не удалась, пробуем прочитать как обычный JSON
+                                try {
+                                    obj = this.#parse(lineData)
+                                    // Если JSON валидный, значит это незашифрованные данные
+                                    needRewrite = true
+                                } catch (err) {
+                                    // Если и JSON невалидный - возвращаем ошибку
+                                    return {
+                                        error: `Error parsing line: ${line}: ${err}`,
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            if (this.#constructorOptions.skipInvalidLines) {
+                                needRewrite = true
+                                continue
+                            }
                             return {
-                                error: `Error decrypting line: ${line}`,
+                                error: `Error parsing line: ${line}: ${err}`,
                             }
                         }
-                        lineData = decrypted as string
                     }
-                    // парсим строку
-                    const obj = this.#parse(lineData)
+                    // первоначальная попытка распарсить строку
+                    try {
+                        // парсим строку
+                        if (obj.id === 'invalid_id') {
+                            obj = this.#parse(lineData)
+                        }
+                    } catch (err) {
+                        // возможно не смогли распарсить так как строка зашифрована, а мы не указали ключ шифрования
+                        if (
+                            !this.#cypherKey &&
+                            this.#constructorOptions?.decryptKey
+                        ) {
+                            try {
+                                // Пробуем расшифровать
+                                const decrypted = await this.#decrypt(
+                                    lineData,
+                                    this.#constructorOptions.decryptKey,
+                                )
+                                if (typeof decrypted === 'string') {
+                                    lineData = decrypted
+                                }
+                                obj = this.#parse(lineData)
+                                needRewrite = true
+                            } catch (err) {
+                                if (this.#constructorOptions.skipInvalidLines) {
+                                    needRewrite = true
+                                    continue
+                                }
+                                return {
+                                    error: `Error parsing line: ${line}: ${err}`,
+                                }
+                            }
+                        }
+                    }
+                    // если после попытки распарсить строку, id все еще invalid_id, то возвращаем ошибку
+                    if (obj.id === 'invalid_id') {
+                        if (this.#constructorOptions.skipInvalidLines) {
+                            needRewrite = true
+                            continue
+                        }
+                        return {
+                            error: `Error parsing line: ${line}`,
+                        }
+                    }
                     // если есть функция фильтрации и она не проходит, то пропускаем
                     if (fn && !fn(obj)) {
                         position += line.length + 1 // +1 for newline
@@ -598,18 +494,38 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     // calculate id key for index
                     const id = this.#idFn(obj)
                     if (id.length > 0) {
+                        this.#logTest('id', id)
+                        // Проверяем наличие записи с таким id в индексе
+                        const existingPosition =
+                            await filePositions.getPositionByDataNoLock(
+                                obj,
+                                (data) => [`byId:${data.id}`],
+                            )
+                        if (existingPosition.size > 0) {
+                            return {
+                                error: `Not unique id in file: ${id}`,
+                            }
+                        }
                         // если есть что проиндексировать, то добавляем позицию в индекс
                         await filePositions.setPositionByDataNoLock(
                             obj,
-                            position,
+                            new FilePosition(position, false, 'main'),
                             this.#idFn,
                         )
                     }
                     result.push(obj)
                 } catch (err) {
+                    if (!this.#initialized && !this.#cypherKey) {
+                        this.$hasDeletedRecords = true
+                        return { error: 'need compress file' }
+                    }
+                    // continue
                     return { error: `Error parsing line: ${line}: ${err}` }
                 }
                 position += line.length + 1 // +1 for newline
+            }
+            if (needRewrite) {
+                return { error: 'need rewrite file', result }
             }
         }
 
@@ -620,14 +536,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                       .getMutex()
                       .withWriteLock(payload, timeoutMs)
 
-        if (
-            readResult &&
+        return readResult &&
             typeof readResult === 'object' &&
             'error' in readResult
-        ) {
-            return readResult
-        }
-        return result
+            ? readResult
+            : result
     }
 
     async delete(
@@ -666,20 +579,32 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                                 const emptyLine = `${' '.repeat(
                                     this.#allocSize - 1,
                                 )}\n`
+
+                                const writePosition =
+                                    pos instanceof FilePosition
+                                        ? pos.position
+                                        : pos
                                 await fileHandle.write(
                                     Buffer.from(emptyLine),
                                     0,
                                     emptyLine.length,
-                                    pos,
+                                    writePosition,
                                 )
                                 // this.#logTest(
                                 //     'filePositions before',
                                 //     filePositions,
                                 // )
-                                await filePositions.replacePositionNoLock(
-                                    pos,
-                                    -100,
-                                )
+                                if (pos instanceof FilePosition) {
+                                    await filePositions.replacePositionNoLock(
+                                        pos,
+                                        new FilePosition(-100, true),
+                                    )
+                                } else {
+                                    await filePositions.replacePositionNoLock(
+                                        pos,
+                                        new FilePosition(-100, true),
+                                    )
+                                }
                                 deletedCount++
                                 // this.#logTest(
                                 //     'filePositions after',
@@ -689,7 +614,6 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                             }
                             // this.#logTest('filePositions after', filePositions)
                         }
-                        return deletedCount
                     } finally {
                         await fileHandle.close()
                     }
@@ -749,7 +673,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     ): Promise<void> {
         this.#ensureInitialized()
         // error throwing for test
-        if (debugTag === 'test-5') {
+        if (debugTag === 'throwError') {
             // await new Promise((resolve) => setTimeout(resolve, 300))
             this.#logTest('error in Transaction: ', debugTag)
             throw new Error(`error in Transaction: ${debugTag}`)
@@ -817,9 +741,13 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     try {
                         for (const [_, posArray] of positions) {
                             for (const pos of posArray) {
+                                const writePosition =
+                                    pos instanceof FilePosition
+                                        ? pos.position
+                                        : pos
                                 const result = await this.#updateExistingRecord(
                                     fileHandle,
-                                    pos,
+                                    writePosition,
                                     line,
                                 )
                                 if (result === 'error') {
@@ -968,7 +896,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const filePositions = await LinePositionsManager.getFilePositions(
             this.#filename.toString(),
         )
-        const mutexLocal = options?.mutex || filePositions.getMutex()
+        const mutexLocal: RWMutex = options?.mutex || filePositions.getMutex()
         this.#inTransactionMode = true
 
         if (!('rollback' in options)) {
@@ -994,12 +922,15 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 )}-${entropy}-${Date.now()}.backup`,
             )
         let backupCreated = false
-        const positionsBackup = new Map<string | number, number[]>()
+        const positionsBackup = new Map<
+            string | number,
+            (number | FilePosition)[]
+        >()
         try {
             try {
                 return await mutexLocal.withWriteLock(async () => {
                     if (options?.rollback) {
-                        // Сохраняем текущее состояние файла
+                        // Сохраняем текущее состояние файла данных
                         try {
                             await fs.copyFile(
                                 this.#filename.toString(),
@@ -1010,7 +941,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                                 key,
                                 positions,
                             ] of await filePositions.getAllPositionsNoLock()) {
-                                positionsBackup.set(key, [...positions])
+                                const positionsDeepClone = cloneDeep(positions)
+                                positionsBackup.set(key, positionsDeepClone)
                             }
                             backupCreated = true
                         } catch (err) {

@@ -1,8 +1,0 @@
-===collection-1:test-data/collection-1.jsonl===
-{"id":1,"name":"test1-1","timestamp":1747968800643,"age":10,"userId":1}
-{"id":2,"name":"test1-2","timestamp":1747968800643,"age":10,"userId":1}
-=====================
-===collection-2:test-data/collection-2.jsonl===
-{"id":1,"name":"test2-1","timestamp":1747968800643,"age":10,"userId":1}
-{"id":2,"name":"test2-2","timestamp":1747968800643,"age":10,"userId":1}
-=====================

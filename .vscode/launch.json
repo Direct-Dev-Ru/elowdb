@@ -21,6 +21,9 @@
             "program": "${workspaceRoot}/node_modules/vitest/vitest.mjs",
             "args": ["run", "${relativeFile}", "-t", "${selectedText}"],
             "smartStep": true,
+            "env": {                
+                "KEEP_TEST_FILES": "1"
+            },
             "console": "integratedTerminal"
         }
     ]
