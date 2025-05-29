@@ -25,6 +25,17 @@
                 "KEEP_TEST_FILES": "1"
             },
             "console": "integratedTerminal"
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Debug Benchmark",
+            "autoAttachChildProcesses": true,
+            "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+            "program": "${workspaceRoot}/node_modules/vitest/vitest.mjs",
+            "args": ["bench", "${relativeFile}"],
+            "smartStep": true,
+            "console": "integratedTerminal"
         }
     ]
 } 

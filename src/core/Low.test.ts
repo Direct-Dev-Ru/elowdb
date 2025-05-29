@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
+import { TestData } from '../../common/interfaces/test-data.js'
 import { deepEqual, equal, throws } from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'

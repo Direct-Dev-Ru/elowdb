@@ -1,11 +1,8 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomBytes } from 'crypto'
 import { EncryptedMemory, EncryptedMemorySync } from './EncryptedMemory.js'
-interface TestData {
-    name: string
-    age: number
-    isActive: boolean
-}
+
 
 describe('EncryptedMemory', () => {
     let adapter: EncryptedMemory<TestData>

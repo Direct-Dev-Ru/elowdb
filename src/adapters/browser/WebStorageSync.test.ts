@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { deepEqual, equal  } from 'node:assert/strict'
 import test from 'node:test'
 

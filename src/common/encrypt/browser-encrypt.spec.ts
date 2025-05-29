@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { encryptStringBrowserAnsibleVault } from './browser-encrypt.js';
 import { decryptStringBrowserAnsibleVault } from '../decrypt/browser-decrypt.js';

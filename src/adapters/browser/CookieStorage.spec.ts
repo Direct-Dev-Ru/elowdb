@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { CookieStorage } from './CookieStorage.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
@@ -40,10 +41,7 @@ describe('CookieStorage', () => {
     });
 
     it('should handle custom parse and stringify functions', async () => {
-        interface TestData {
-            id: number;
-            name: string;
-        }
+        
 
         const testData: TestData = { id: 1, name: 'test' };
         const customStorage = new CookieStorage<TestData>(TEST_KEY, {

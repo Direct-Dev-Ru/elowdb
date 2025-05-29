@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { decryptStringNodeAnsibleVault } from './node-decrypt.js';
 import { encryptStringNodeAnsibleVault } from '../encrypt/node-encrypt.js';

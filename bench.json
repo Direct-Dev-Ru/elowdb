@@ -1,0 +1,37 @@
+{
+  "files": [
+    {
+      "filepath": "/home/su/projects/typescript/elowdb/src/adapters/node/JSONLFile.bench.ts",
+      "groups": [
+        {
+          "fullName": "src/adapters/node/JSONLFile.bench.ts > JSONLFile Benchmarks",
+          "benchmarks": [
+            {
+              "id": "-187640040_0_2",
+              "sampleCount": 1769,
+              "name": "read by id",
+              "rank": 1,
+              "rme": 4.598742475571404,
+              "totalTime": 1000.1706450005004,
+              "min": 0.26768900000024587,
+              "max": 7.027901000023121,
+              "hz": 1768.6981804981037,
+              "period": 0.5653875890336351,
+              "mean": 0.5653875890336351,
+              "variance": 0.31130522684986156,
+              "sd": 0.5579473334015153,
+              "sem": 0.013265673065560648,
+              "df": 1768,
+              "critical": 1.96,
+              "moe": 0.02600071920849887,
+              "p75": 0.5756320000218693,
+              "p99": 3.4885570000042208,
+              "p995": 4.2347200000076555,
+              "p999": 6.335012000025017
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

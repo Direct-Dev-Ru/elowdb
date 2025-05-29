@@ -30,6 +30,10 @@ export class FilePosition {
         return this._position
     }
 
+    set position(position: number) {
+        this._position = position
+    }
+
     get isDeleted(): boolean {
         return this._isDeleted
     }
@@ -89,6 +93,22 @@ export class FilePositions {
         this.positions.set(id, positions)
     }
 
+    async recalculatePositionNoLock(k: number = 2): Promise<void> {
+        // Проходим по всем записям в карте
+        for (const [currentId, positions] of this.positions.entries()) {
+            for (let index = 0; index < positions.length; index++) {
+                let position = positions[index]
+                if (position instanceof FilePosition) {
+                    position.position *= k
+                } else {
+                    position *= k
+                }
+                positions[index] = position
+            }
+            this.positions.set(currentId, positions)
+        }
+    }
+
     async replacePositionNoLock(
         oldPosition: number | FilePosition,
         newPosition: number | FilePosition,
@@ -122,18 +142,28 @@ export class FilePositions {
         this.positions.clear()
     }
 
-    async getAllPositions(): Promise<
-        Map<string | number, (number | FilePosition)[]>
-    > {
+    async getAllPositions(
+        idxName?: string,
+    ): Promise<Map<string | number, (number | FilePosition)[]>> {
         return await this.mutex.withReadLock(async () => {
-            return this.positions
+            return this.getAllPositionsNoLock(idxName)
         })
     }
 
-    async getAllPositionsNoLock(): Promise<
-        Map<string | number, (number | FilePosition)[]>
-    > {
-        return this.positions
+    async getAllPositionsNoLock(
+        idxName?: string,
+    ): Promise<Map<string | number, (number | FilePosition)[]>> {
+        if (!idxName) {
+            return this.positions
+        }
+        const result = new Map<string | number, (number | FilePosition)[]>()
+        for (const [id, positions] of this.positions.entries()) {
+            if (idxName && !id.toString().includes(idxName)) {
+                continue
+            }
+            result.set(id, positions)
+        }
+        return result
     }
 
     async setAllPositions(
@@ -166,6 +196,26 @@ export class FilePositions {
             }
             return result
         }, timeoutMs)
+    }
+
+    async getPositionsByArrayOfDataNoLock<T extends { id: string | number }>(
+        data: T[],
+        idFn?: (data: T) => (string | number)[],
+    ): Promise<Map<string | number, (number | FilePosition)[]>> {
+        const result = new Map<string | number, (number | FilePosition)[]>()
+        for (const item of data) {
+            const ids = idFn ? idFn(item) : [`byId:${item.id}`]
+            for (const id of ids) {
+                const positions = this.positions.get(id)
+                if (positions) {
+                    const resId = id.toString().includes(':')
+                        ? id.toString().split(':')[1]
+                        : id
+                    result.set(resId, positions)
+                }
+            }
+        }
+        return result
     }
 
     async getPositionByDataNoLock<T extends LineDbAdapter>(

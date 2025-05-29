@@ -3,6 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+import { TestData } from '../../common/interfaces/test-data.js'
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
@@ -14,10 +15,7 @@ import test from 'node:test'
 import { JSONFile } from '../adapters/node/JSONFile.js'
 import { UpdLow } from './UpdLow.js'
 
-interface TestData {
-    value?: number
-    items?: string[]
-}
+
 
 let testFilePath: string = join(tmpdir(), `test-${Date.now()}.json`)
 let adapter = new JSONFile<TestData>(testFilePath)

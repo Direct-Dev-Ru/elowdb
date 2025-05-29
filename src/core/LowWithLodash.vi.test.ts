@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,13 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { JSONFile } from '../adapters/node/JSONFile.js'
 import { LowWithLodash } from './LowWithLodash.js'
 
-interface TestData {
-    users: Array<{
-        id: number
-        name: string
-        age: number
-        active: boolean
-    }>
+>
     posts: Array<{
         id: number
         title: string

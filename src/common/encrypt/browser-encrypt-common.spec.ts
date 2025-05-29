@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { encryptString } from './browser-encrypt-common.js';
 import { decryptString } from '../decrypt/browser-decrypt-common.js';

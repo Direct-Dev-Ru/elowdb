@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { temporaryFile } from 'tempy';
 import { FileAdapterFactory, FileType, SyncType } from './FileAdapterFactory.js';
@@ -5,14 +6,7 @@ import fs from 'node:fs/promises';
 import { ObjectId } from 'bson';
 import { DataFile, DataFileSync } from './DataFile.js';
 
-interface TestData {
-    _id?: ObjectId;
-    id: number;
-    name: string;
-    nested?: {
-        value: string;
-        date?: Date;
-    };
+;
 }
 
 describe('FileAdapterFactory', () => {

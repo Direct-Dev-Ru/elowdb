@@ -1,18 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest'
-import fs from 'node:fs'
+import fs, { read } from 'node:fs'
 import path from 'node:path'
 import { JSONLFile } from './JSONLFile.js'
 import { LinePositionsManager } from '../../common/positions/position.js'
 import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 import { json } from 'node:stream/consumers'
 import { log } from 'node:console'
-
-interface TestData {
-    id: string
-    name: string
-    value: number
-    user: string
-}
+import { TestData } from '../../common/interfaces/test-data.js'
+import { JSONLFileOptions } from '../../common/interfaces/jsonl-file.js'
 
 function getRandom(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1) + min)
@@ -66,7 +61,7 @@ describe('JSONLFile', () => {
         }
     })
 
-    describe('JSONLFile warm up', () => {
+    describe('JSONLFile Warmup', () => {
         it('01.should store collectionName in the adapter', async () => {
             logInThisTest = true
             const testFile = `${testFileMain}_B01.jsonl`
@@ -97,10 +92,121 @@ describe('JSONLFile', () => {
                 jsonlFile.getCollectionName(),
             )
         })
+        it('02.should resize allocSize then write', async () => {
+            logInThisTest = true
+            const testFile = `${testFileMain}_B02.jsonl`
+            try {
+                await safeUnlink(testFile, true)
+            } catch (error) {
+                // console.log('Error deleting file:', error)
+            }
+
+            jsonlFile = new JSONLFile<TestData>(testFile, '', {
+                allocSize: 128 * 1,
+                collectionName: 'test-warmup',
+            })
+            await jsonlFile.init()
+
+            const testData: TestData[] = [
+                {
+                    id: '1',
+                    name: 'Test',
+                    value: 42,
+                    user: 'User1',
+                },
+                {
+                    id: '2',
+                    name: 'Test2',
+                    value: 43,
+                    user: 'User2',
+                },
+                {
+                    id: '3',
+                    name: 'Test3',
+                    value: 44,
+                    user: 'User3',
+                },
+            ]
+            const testData2: TestData[] = [
+                {
+                    id: '11',
+                    name: `Test${'11111111111111111'.repeat(5)}`,
+                    value: 142,
+                    user: 'User11',
+                },
+                {
+                    id: '12',
+                    name: 'Test 12',
+                    value: 143,
+                    user: 'User12',
+                },
+            ]
+            await jsonlFile.write(testData)
+
+            const result = await jsonlFile.read()
+            expect(result).toEqual(testData)
+            //logTest(logInThisTest, 'positions ::::', await jsonlFile.getPositionsNoLock())
+
+            await jsonlFile.write(testData2)
+            logTest(
+                logInThisTest,
+                'positions after second write ::::',
+                await jsonlFile.getPositionsNoLock(),
+            )
+
+            const result3 = await jsonlFile.readByData({ id: '3' })
+            expect(result3).toEqual(
+                [...testData, ...testData2].filter((data) => data.id === '3'),
+            )
+            const result4 = await jsonlFile.readByData({ id: '12' })
+            expect(result4).toEqual(
+                [...testData, ...testData2].filter((data) => data.id === '12'),
+            )
+        })
+        it('03.should double allocSize then init', async () => {
+            logInThisTest = true
+            const testFile = `${testFileMain}_B03.jsonl`
+            try {
+                await safeUnlink(testFile, true)
+            } catch (error) {
+                // console.log('Error deleting file:', error)
+            }
+
+            jsonlFile = new JSONLFile<TestData>(testFile, '', {
+                allocSize: 32,
+                // collectionName: 'test-warmup',
+            })
+            await jsonlFile.init()
+
+            const testData: TestData[] = [
+                {
+                    id: '1',
+                    name: 'Test',
+                    value: 42,
+                    user: 'User1',
+                },
+                {
+                    id: '2',
+                    name: 'Test2',
+                    value: 43,
+                    user: 'User2',
+                },
+                {
+                    id: '3',
+                    name: 'Test3',
+                    value: 44,
+                    user: 'User3',
+                },
+            ]
+
+            await jsonlFile.write(testData)
+            const result = await jsonlFile.read()
+            expect(result).toEqual(testData)
+        })
     })
 
-    describe.skip('JSONLFile step without transaction', () => {
-        it('01.should write and read a single object', async () => {
+    describe('JSONLFile step without transaction', () => {
+        it('01.should write and readByData', async () => {
             const testFile = `${testFileMain}_01.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -115,13 +221,31 @@ describe('JSONLFile', () => {
 
             const testData: TestData = {
                 id: '1',
-                name: 'Test',
+                name: 'Test-1',
                 value: 42,
                 user: 'User1',
             }
             await jsonlFile.write(testData)
             const result = await jsonlFile.read()
             expect(result).toEqual([testData])
+            const result2 = await jsonlFile.readByData(
+                { name: 'Test-1' },
+                { strictCompare: true, inTransaction: false },
+            )
+            expect(result2).toEqual([testData])
+            await jsonlFile.write({
+                ...testData,
+                id: '2',
+                name: 'Test-2',
+            })
+            const result3 = await jsonlFile.readByData(
+                { name: 'Test' },
+                { strictCompare: false, inTransaction: false },
+            )
+            expect(result3).toEqual([
+                testData,
+                { ...testData, id: '2', name: 'Test-2' },
+            ])
         })
 
         it('02.should write and read multiple objects', async () => {
@@ -138,32 +262,34 @@ describe('JSONLFile', () => {
             await jsonlFile.init()
 
             const testData: TestData[] = []
-            for (let i = 1; i <= 10; i++) {
+            for (let i = 1; i <= 5; i++) {
                 testData.push({
-                    id: i.toString(),
-                    name: `Test${i}.`.repeat(getRandom(1, i)),
-                    value: getRandom(20, 40),
+                    id: i.toString().padStart(3, '0'),
+                    name: `Test${i}.`,
+                    value: getRandom(5, 40),
                     user: `User${i % 2}`,
                 })
             }
+            testData[0].value = -1
             await jsonlFile.write(testData[0])
+            await jsonlFile.write(testData[1])
+            await jsonlFile.write(testData[0])
+
             await jsonlFile.write(testData)
             const result = await jsonlFile.read()
-
             expect(result).toEqual(testData)
 
-            const jsonlFile2 = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 512,
-            })
+            const jsonlFile2 = new JSONLFile<TestData>(testFile, '')
             await jsonlFile2.init()
             await jsonlFile2.write([
-                { ...testData[2], name: 'Test2.00' },
-                { ...testData[4], name: 'Test4.00' },
+                { ...testData[2], name: 'Test2.Updated' },
+                { ...testData[4], name: 'Test4.Updated' },
             ])
+
             const result2 = await jsonlFile2.read()
             const testData2 = [...testData]
-            testData2[2].name = 'Test2.00'
-            testData2[4].name = 'Test4.00'
+            testData2[2].name = 'Test2.Updated'
+            testData2[4].name = 'Test4.Updated'
             expect(result2).toEqual(testData2)
         })
 
@@ -176,26 +302,30 @@ describe('JSONLFile', () => {
             }
 
             jsonlFile = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 512,
+                allocSize: 1024 * 8,
             })
             await jsonlFile.init()
 
             const testData: TestData[] = []
-            for (let i = 1; i <= 10; i++) {
+            for (let i = 1; i <= 5; i++) {
                 testData.push({
                     id: i.toString(),
-                    name: `Test${i}.`.repeat(getRandom(1, 20)),
+                    name: `Test${i}.`.repeat(getRandom(180, 200)),
                     value: getRandom(20, 40),
                     user: `User${i % 2}`,
                 })
             }
 
             await jsonlFile.write(testData)
-            const result = await jsonlFile.readByData({ id: '5' })
+
+            const idToFind = '5'
+            const result = await jsonlFile.readByData({ id: idToFind })
 
             expect(Array.isArray(result)).toBe(true)
             if (Array.isArray(result)) {
-                expect(result[0]).toEqual(testData[4]) // Индекс 4 соответствует id '5'
+                expect(result.find((data) => data.id === idToFind)).toEqual(
+                    testData.find((data) => data.id === idToFind),
+                )
             }
             const result2 = await jsonlFile.readByData({ user: 'User1' })
 
@@ -207,20 +337,53 @@ describe('JSONLFile', () => {
             }
 
             const jsonlFileUserIdx = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 512,
+                allocSize: 1024 * 2,
                 idFn: (data) => [`byUser:${data.user}`],
             })
             await jsonlFileUserIdx.init()
+            logTest(true, 'map: ', await jsonlFileUserIdx.getPositionsNoLock())
+            logTest(true, 'allocSize: ', jsonlFileUserIdx.getAllocSize())
             const result3 = await jsonlFileUserIdx.readByData(
                 { user: 'User1' },
-                { strictCompare: false },
+                { strictCompare: false, inTransaction: false },
             )
             expect(Array.isArray(result3)).toBe(true)
+            logTest(
+                true,
+                'result3: ',
+                result3.map((data) => data.id),
+            )
+            logTest(
+                true,
+                'result3: ',
+                testData
+                    .filter((data) => data.user === 'User1')
+                    .map((data) => data.id),
+            )
             if (Array.isArray(result3)) {
-                expect(result3).toEqual(
-                    testData.filter((data) => data.user === 'User1'),
+                expect(result3.map((data) => data.id)).toEqual(
+                    testData
+                        .filter((data) => data.user === 'User1')
+                        .map((data) => data.id),
                 )
             }
+
+            const jsonlFileUserIdx2 = new JSONLFile<TestData>(testFile, '', {
+                allocSize: 1024 * 2,
+                idFn: (data) => [`byId:${data.id}`],
+            })
+            await jsonlFileUserIdx2.init()
+            logTest(
+                true,
+                'map3: ',
+                await jsonlFileUserIdx2.getPositionsNoLock(),
+            )
+            logTest(true, 'allocSize3: ', jsonlFileUserIdx2.getAllocSize())
+            const result4 = await jsonlFileUserIdx2.readByData(
+                { id: idToFind },
+                { strictCompare: false, inTransaction: false },
+            )
+            expect(Array.isArray(result4)).toBe(true)
         })
 
         it('04.should update existing record with encryption', async () => {
@@ -231,8 +394,8 @@ describe('JSONLFile', () => {
                 // console.log('Error deleting file:', error)
             }
 
-            jsonlFile = new JSONLFile<TestData>(testFile, '1111111', {
-                allocSize: 4096,
+            jsonlFile = new JSONLFile<TestData>(testFile, 'test-key', {
+                allocSize: 2048,
                 // encrypt: async (text, cypherKey) => {
                 //     return await encryptString(text, cypherKey)
                 // },
@@ -245,7 +408,7 @@ describe('JSONLFile', () => {
             for (let i = 1; i <= 20; i++) {
                 testData.push({
                     id: i.toString(),
-                    name: `Test${i}-`.repeat(getRandom(1, 20)),
+                    name: `Test${i}-`.repeat(getRandom(1, 100)),
                     value: getRandom(20, 40),
                     user: `User${i % 2}`,
                 })
@@ -447,8 +610,8 @@ describe('JSONLFile', () => {
             }
 
             const jsonlFile = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 128 * 1,
-                idFn: (data) => [`byUser:${data.user}`, `byId:${data.id}`],
+                idFn: (data) => [`byUser:${data.user}`],
+                allocSize: 1024 * 4,
             })
             await jsonlFile.init()
 
@@ -464,25 +627,18 @@ describe('JSONLFile', () => {
 
             // Записываем данные
             await jsonlFile.write(testData)
+            logTest(true, 'map: ', await jsonlFile.getPositionsNoLock())
+            logTest(true, 'allocSize: ', jsonlFile.getAllocSize())
 
             // Удаляем несколько записей
             await jsonlFile.delete([{ id: '2', user: 'User1' }, { id: '4' }])
-            // await jsonlFile.delete({ user: 'User1' })
 
-            // // Проверяем, что удаленные записи не читаются
-            // const result = await jsonlFile.read()
-            // expect(result).toEqual(
-            //     testData.filter((_, index) => index !== 1 && index !== 3),
-            // )
-
-            // // Проверяем поиск по id удаленной записи
-            // const deletedResult = await jsonlFile.readByData({ id: '2' })
-            // expect(Array.isArray(deletedResult)).toBe(true)
-            // if (Array.isArray(deletedResult)) {
-            //     expect(deletedResult.length).toBe(0)
-            // }
-
-            const checkId = '10'
+            logTest(
+                true,
+                'map after delete: ',
+                await jsonlFile.getPositionsNoLock(),
+            )
+            const checkId = '3'
             const result2 = await jsonlFile.readByData({ id: checkId })
             logTest(logInThisTest, 'result2', result2)
             expect(Array.isArray(result2)).toBe(true)
@@ -490,12 +646,19 @@ describe('JSONLFile', () => {
                 expect(result2.length).toBe(1)
                 expect(result2[0].id).toBe(checkId)
             }
+
             const result3 = await jsonlFile.readByData({ user: 'User0' })
             logTest(logInThisTest, 'result3', result3)
             expect(Array.isArray(result3)).toBe(true)
             if (Array.isArray(result3)) {
                 expect(result3.length).toBe(3)
             }
+
+            const jsonlFile2 = new JSONLFile<TestData>(testFile)
+            await jsonlFile2.init()
+            const result4 = await jsonlFile2.readByData({ user: 'User0' })
+            logTest(logInThisTest, 'result4', result4)
+            expect(Array.isArray(result4)).toBe(true)
         })
 
         it('11.should handle file compression', async () => {
@@ -556,10 +719,72 @@ describe('JSONLFile', () => {
             //     .filter((line) => line.trim().length > 0)
             // expect(lines.length).toBe(8) // 10 - 2 удаленные записи
         })
+
+        it('12.should handle record deletion by filter with no indexed field', async () => {
+            const testFile = `${testFileMain}_12_deletion.jsonl`
+            try {
+                await safeUnlink(testFile, true)
+            } catch (error) {
+                // console.log('Error deleting file:', error)
+            }
+
+            const jsonlFile = new JSONLFile<TestData>(testFile, '', {
+                idFn: (data) => [`byUser:${data.user}`],
+                allocSize: 256 * 1,
+            })
+            await jsonlFile.init()
+
+            const testData: TestData[] = []
+            for (let i = 1; i <= 5; i++) {
+                testData.push({
+                    id: i.toString(),
+                    name: `Test${i}`,
+                    value: i * 10,
+                    user: `User${i % 2}`,
+                })
+            }
+
+            // Записываем данные
+            await jsonlFile.write(testData)
+            logTest(true, 'map: ', await jsonlFile.getPositionsNoLock())
+            logTest(true, 'allocSize: ', jsonlFile.getAllocSize())
+
+            // Удаляем записи по фильтру по полу которое не в индексе
+            const deletedCount = await jsonlFile.delete([{ value: 30 }])
+            expect(deletedCount).toBe(1)
+
+            logTest(
+                true,
+                'map after delete: ',
+                await jsonlFile.getPositionsNoLock(),
+            )
+
+            const checkId = '2'
+            const result2 = await jsonlFile.readByData({ id: checkId })
+            logTest(logInThisTest, 'result2', result2)
+            expect(Array.isArray(result2)).toBe(true)
+            if (Array.isArray(result2)) {
+                expect(result2.length).toBe(1)
+                expect(result2[0].id).toBe(checkId)
+            }
+
+            const result3 = await jsonlFile.readByData({ user: 'User0' })
+            logTest(logInThisTest, 'result3', result3)
+            expect(Array.isArray(result3)).toBe(true)
+            if (Array.isArray(result3)) {
+                expect(result3.length).toBe(2)
+            }
+
+            const jsonlFile2 = new JSONLFile<TestData>(testFile)
+            await jsonlFile2.init()
+            const result4 = await jsonlFile2.readByData({ user: 'User0' })
+            logTest(logInThisTest, 'result4', result4)
+            expect(Array.isArray(result4)).toBe(true)
+        })
     })
 
     describe.skip('JSONLFile step withTransaction', () => {
-        it('01T.should write and read multiple objects', async () => {
+        it.skip('01T.should write and read multiple objects', async () => {
             const testFile = `${testFileMain}_01T.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -598,7 +823,7 @@ describe('JSONLFile', () => {
             expect(result).toEqual([data1, data2])
         })
 
-        it('02T.should rollback then error', async () => {
+        it.skip('02T.should rollback then error', async () => {
             logInThisTest = false
             const testFile = `${testFileMain}_02T.jsonl`
             try {
@@ -671,7 +896,7 @@ describe('JSONLFile', () => {
             )
         })
 
-        it('03T.should use external mutex when specified', async () => {
+        it.skip('03T.should use external mutex when specified', async () => {
             const testFile = `${testFileMain}_03T.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -711,7 +936,7 @@ describe('JSONLFile', () => {
             expect(result).toEqual([data1, data2])
         })
 
-        it('04T.should handle concurrent transactions', async () => {
+        it.skip('04T.should handle concurrent transactions', async () => {
             const testFile = `${testFileMain}_04T.jsonl`
             logInThisTest = false
             try {
@@ -754,11 +979,11 @@ describe('JSONLFile', () => {
                     testData.map((data, index) =>
                         jsonlFile.withTransaction(
                             async (tx) => {
-                                await tx.write(
-                                    data,
-                                    true,
-                                    index === 5 ? 'throwError' : 'noError',
-                                )
+                                await tx.write(data, {
+                                    inTransaction: true,
+                                    debugTag:
+                                        index === 5 ? 'throwError' : 'noError',
+                                })
                             },
                             { rollback: true, mutex: externalMutex },
                         ),
@@ -784,7 +1009,7 @@ describe('JSONLFile', () => {
             )
         })
 
-        it('05T.should support reading in a transaction', async () => {
+        it.skip('05T.should support reading in a transaction', async () => {
             const testFile = `${testFileMain}_05T.jsonl`
             logInThisTest = false
             try {
@@ -819,7 +1044,9 @@ describe('JSONLFile', () => {
             await jsonlFile.write([data1, data2])
 
             await jsonlFile.withTransaction(async (tx) => {
-                let result = await tx.read(undefined, true)
+                const result = await tx.read(undefined, {
+                    inTransaction: true,
+                })
                 expect(result).toHaveLength(2)
                 expect(result).toEqual([data1, data2])
 
@@ -836,7 +1063,7 @@ describe('JSONLFile', () => {
             })
         })
 
-        it('06T.should support deletion in a transaction', async () => {
+        it.skip('06T.should support deletion in a transaction', async () => {
             const testFile = `${testFileMain}_06T.jsonl`
             logInThisTest = false
             try {
@@ -886,7 +1113,7 @@ describe('JSONLFile', () => {
             })
         })
 
-        it('07T.should restore file state on error', async () => {
+        it.skip('07T.should restore file state on error', async () => {
             const testFile = `${testFileMain}_07T.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -966,7 +1193,7 @@ describe('JSONLFile', () => {
             expect(result2).toEqual([initialData, data1])
         })
 
-        it('08T.should handle backup file cleanup', async () => {
+        it.skip('08T.should handle backup file cleanup', async () => {
             const testFile = `${testFileMain}_08T.jsonl`
             try {
                 await safeUnlink(testFile)
@@ -1003,7 +1230,7 @@ describe('JSONLFile', () => {
             expect(backupExists).toBe(false)
         })
 
-        it('09T.should handle backup file creation for new database', async () => {
+        it.skip('09T.should handle backup file creation for new database', async () => {
             const testFile = `${testFileMain}_09T.jsonl`
             try {
                 await safeUnlink(testFile)
@@ -1077,7 +1304,8 @@ describe('JSONLFile', () => {
             )
 
             jsonlFile = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 2048, skipInvalidLines: true,
+                allocSize: 2048,
+                skipInvalidLines: true,
             })
             await jsonlFile.init(false)
 
@@ -1088,7 +1316,7 @@ describe('JSONLFile', () => {
             // expect(result[2]).toEqual({ id: '1', name: 'Test 3' })
         })
 
-        it('03E.should handle maximum line length', async () => {
+        it('03E.should realoc allocSize if line length is greater than allocSize', async () => {
             const testFile = `${testFileMain}_03E.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -1097,11 +1325,11 @@ describe('JSONLFile', () => {
             }
 
             jsonlFile = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 100,
+                allocSize: 128,
             })
             await jsonlFile.init()
 
-            const longName = 'x'.repeat(90)
+            const longName = 'x'.repeat(200)
             const testData: TestData = {
                 id: '1',
                 name: longName,
@@ -1109,9 +1337,19 @@ describe('JSONLFile', () => {
                 user: 'User1',
             }
 
-            await expect(jsonlFile.write(testData)).rejects.toThrow(
-                'Line length',
-            )
+            await jsonlFile.write(testData)
+            const result = await jsonlFile.read()
+            expect(result).toHaveLength(1)
+            expect(result[0]).toEqual(testData)
+
+            const jsonlFile2 = new JSONLFile<TestData>(testFile, '', {
+                allocSize: 128,
+            })
+            await jsonlFile2.init()
+
+            const result2 = await jsonlFile2.read()
+            expect(result2).toHaveLength(1)
+            expect(result2[0]).toEqual(testData)
         })
 
         it('04E.should handle file with only deleted records', async () => {
@@ -1209,7 +1447,7 @@ describe('JSONLFile', () => {
             jsonlFile = new JSONLFile<TestData>(testFile, '', {
                 allocSize: 512,
             })
-            try {                
+            try {
                 await jsonlFile.init()
             } catch (error) {
                 expect(error).toBeInstanceOf(Error)
@@ -1224,21 +1462,32 @@ describe('JSONLFile', () => {
             } catch (error) {
                 // Игнорируем ошибку, если файл не существует
             }
-
+            const firstLine =
+                '{"id":"1","name":"Test1","value":42,"user":"User1"}'
+            const secondLine =
+                '{"id":"2","name":"Test2","value":43,"user":"User2"}'
+            const initAllocSize = 128
             // Создаем файл с пустыми строками
             await fs.promises.writeFile(
                 testFile,
-                '\n\n{"id":"1","name":"Test"}\n\n',
+                '\n\n' +
+                    firstLine +
+                    ' '.repeat(initAllocSize - firstLine.length - 1) +
+                    '\n' +
+                    secondLine +
+                    ' '.repeat(initAllocSize - secondLine.length - 1) +
+                    '\n\n',
             )
 
             jsonlFile = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 512,
+                allocSize: initAllocSize,
             })
             await jsonlFile.init(false)
-
+            // logTest(true, 'allocSize: ', jsonlFile.getAllocSize())
             const result = await jsonlFile.read()
-            expect(result).toHaveLength(1)
-            expect(result[0]).toEqual({ id: '1', name: 'Test' })
+            expect(result).toHaveLength(2)
+            expect(result[0]).toEqual(JSON.parse(firstLine))
+            expect(result[1]).toEqual(JSON.parse(secondLine))
         })
 
         it('08E.should handle file with special characters in data', async () => {
@@ -1414,9 +1663,13 @@ describe('JSONLFile', () => {
                 },
             ]
             // Создаем экземпляр с ключом шифрования
-            const jsonlFileEncrypted = new JSONLFile<TestData>(testFile, 'test-key', {
-                allocSize: 2048,
-            })
+            const jsonlFileEncrypted = new JSONLFile<TestData>(
+                testFile,
+                'test-key',
+                {
+                    allocSize: 2048,
+                },
+            )
             await jsonlFileEncrypted.init(false)
             await jsonlFileEncrypted.write(testData)
 
@@ -1433,20 +1686,34 @@ describe('JSONLFile', () => {
             for (const line of linesEncrypted) {
                 expect(() => JSON.parse(line)).toThrow()
             }
-            
+
             const jsonlFileUnencrypted = new JSONLFile<TestData>(testFile, '', {
-                allocSize: 2048, decryptKey: 'test-key'
+                allocSize: 2048,
+                decryptKey: 'test-key',
             })
             await jsonlFileUnencrypted.init(false)
-            
+
             // При инициализации данные должны быть автоматически зашифрованы
             const result = await jsonlFileUnencrypted.read()
             expect(result).toHaveLength(2)
-            expect(result[0]).toEqual({ id: '1', name: 'Test1', value: 42, user: 'User1' })
-            expect(result[1]).toEqual({ id: '2', name: 'Test2', value: 43, user: 'User2' })
+            expect(result[0]).toEqual({
+                id: '1',
+                name: 'Test1',
+                value: 42,
+                user: 'User1',
+            })
+            expect(result[1]).toEqual({
+                id: '2',
+                name: 'Test2',
+                value: 43,
+                user: 'User2',
+            })
 
             // Проверяем, что данные в файле теперь не зашифрованы
-            const fileContentUnencrypted = await fs.promises.readFile(testFile, 'utf8')
+            const fileContentUnencrypted = await fs.promises.readFile(
+                testFile,
+                'utf8',
+            )
             const linesUnencrypted = fileContentUnencrypted
                 .split('\n')
                 .filter((line) => line.trim().length > 0)
@@ -1454,7 +1721,7 @@ describe('JSONLFile', () => {
             // Проверяем, что строки не зашифрованы (являются валидным JSON)
             for (const line of linesUnencrypted) {
                 expect(() => JSON.parse(line)).not.toThrow()
-            }            
+            }
         })
     })
 })

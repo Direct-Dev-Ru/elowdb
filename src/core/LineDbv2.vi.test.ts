@@ -1,3 +1,4 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { describe, it, expect, beforeEach, afterEach, vi, Test } from 'vitest'
 import { LineDb, LineDbAdapter } from './LineDbv2.js'
 import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'

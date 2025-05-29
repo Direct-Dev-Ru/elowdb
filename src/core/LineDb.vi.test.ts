@@ -1,14 +1,11 @@
+import { TestData } from '../../common/interfaces/test-data.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { LineDb } from './LineDb.js'
 import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-interface TestData {
-    id: number
-    name: string
-    age: number
-}
+
 interface TestUser {
     id: number
     username: string

@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await */
+import { TestData } from '../../common/interfaces/test-data.js'
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,10 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { JSONFile } from '../adapters/node/JSONFile.js'
 import { UpdLow } from './UpdLow.js'
 
-interface TestData {
-    value?: number
-    items?: string[]
-}
+
 
 const skipTop: boolean = false
 
