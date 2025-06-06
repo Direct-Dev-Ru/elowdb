@@ -43,11 +43,11 @@ export function encryptStringSyncNodeAnsibleVault(
         return ''
     }
     if (!password) {
-        throw new Error('password is required for encryption')
+        throw new Error('Password is required for encryption')
     }
     // Check if the file is already encrypted
     if (strData.startsWith('$ANSIBLE_VAULT;') && !force) {
-        throw new Error('data already encrypted and no force flag provided')
+        throw new Error('Data already encrypted and no force flag provided')
     }
     return encrypt(strData, password)
 }

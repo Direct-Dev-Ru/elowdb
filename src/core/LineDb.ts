@@ -106,7 +106,7 @@ export class LineDb<T extends { id: string | number }> {
         })
     }
 
-    async readByData(
+    async readByFilter(
         data: Partial<T>,
         options?: { strictCompare?: boolean },
     ): Promise<T[]> {
@@ -126,7 +126,7 @@ export class LineDb<T extends { id: string | number }> {
                 }
             }
 
-            const results = await this.#adapter.readByData(data, options)
+            const results = await this.#adapter.readByFilter(data, options)
 
             // Обновляем кэш
             for (const item of results) {

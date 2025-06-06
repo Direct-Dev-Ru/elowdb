@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
+import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
+
 import { ITransaction } from '../common/interfaces/jsonl-file'
 
 export class JSONLTransaction implements ITransaction {
@@ -9,6 +11,7 @@ export class JSONLTransaction implements ITransaction {
     rollback: boolean
     backupFile: string
     doNotDeleteBackupFile: boolean
+    mutex: RWMutex
 
     constructor(
         options: {
@@ -18,6 +21,7 @@ export class JSONLTransaction implements ITransaction {
             rollback: boolean
             backupFile: string
             doNotDeleteBackupFile: boolean
+            mutex: RWMutex
         } = {
             mode: 'write',
             id: crypto.randomUUID(),
@@ -25,16 +29,18 @@ export class JSONLTransaction implements ITransaction {
             rollback: false,
             backupFile: '',
             doNotDeleteBackupFile: false,
+            mutex: new RWMutex(),
         },
     ) {
         this.transactionMode = options.mode
+        this.mutex = options.mutex
         this.transactionId = options.id
         this.timeoutMs = options.timeout
         this.rollback = options.rollback
         this.backupFile = options.backupFile
         this.doNotDeleteBackupFile = options.doNotDeleteBackupFile
         this.timeoutId = setTimeout(() => {
-            throw new Error(`Transaction timeout after ${options.timeout}ms`)
+            throw new Error(`Transaction timeout after ${options.timeout} ms`)
         }, options.timeout)
     }
 

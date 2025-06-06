@@ -19,7 +19,7 @@ export class FilePosition {
     constructor(
         position: number,
         isDeleted: boolean = false,
-        partition: string | number = 'main',
+        partition: string | number = crypto.randomUUID(),
     ) {
         this._position = position
         this._isDeleted = isDeleted
@@ -269,6 +269,35 @@ export class FilePositions {
                 positions.push(position)
                 this.positions.set(id, positions)
             }
+        }
+    }
+
+    async addPositionByIndexNoLock(
+        index: string,
+        position: number | FilePosition,
+    ): Promise<void> {
+        const positions = this.positions.get(index) || []
+        const exists = positions.some((p) => {
+            if (p instanceof FilePosition) {
+                return p.position === (position as FilePosition).position
+            }
+            return p === (position as number)
+        })
+        if (!exists) {
+            positions.push(position)
+            this.positions.set(index, positions)
+        }
+    }
+
+    async removePositionByIndexNoLock(
+        index: string,
+        position: number | FilePosition,
+    ): Promise<void> {
+        const positions = this.positions.get(index) || []
+        const indexToRemove = positions.indexOf(position)
+        if (indexToRemove !== -1) {
+            positions.splice(indexToRemove, 1)
+            this.positions.set(index, positions)
         }
     }
 }

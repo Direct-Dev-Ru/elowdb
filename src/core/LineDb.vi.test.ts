@@ -97,7 +97,7 @@ describe('LineDb', () => {
             const data: TestData = { id: -1, name: 'Test', age: 25 }
             await db.init(true)
             await db.write(data)
-            const result = await db.readByData({ id: 1 })
+            const result = await db.readByFilter({ id: 1 })
             expect(result).toHaveLength(1)
             expect(result[0]).toEqual(data)
         })
@@ -107,7 +107,7 @@ describe('LineDb', () => {
             const data2: TestData = { id: 2, name: 'Another User', age: 30 }
             await db.write([data1, data2])
 
-            const result = await db.readByData(
+            const result = await db.readByFilter(
                 { name: 'Test' },
                 { strictCompare: false },
             )
@@ -122,10 +122,10 @@ describe('LineDb', () => {
             await db.write(data)
 
             // Первое чтение должно загрузить в кэш
-            await db.readByData({ id: 1 })
+            await db.readByFilter({ id: 1 })
 
             // Второе чтение должно использовать кэш
-            const result = await db.readByData({ id: 1 })
+            const result = await db.readByFilter({ id: 1 })
             expect(result).toHaveLength(1)
             expect(result[0]).toEqual(data)
         })
@@ -135,14 +135,14 @@ describe('LineDb', () => {
             await db.write(data)
 
             // Загружаем в кэш
-            await db.readByData({ id: 1 })
+            await db.readByFilter({ id: 1 })
 
             // Обновляем данные
             const updatedData = { ...data, name: 'Updated', age: 26 }
             await db.write(updatedData)
 
             // Проверяем, что кэш обновился
-            const result = await db.readByData({ id: 1 })
+            const result = await db.readByFilter({ id: 1 })
             expect(result[0]).toEqual(updatedData)
         })
     })

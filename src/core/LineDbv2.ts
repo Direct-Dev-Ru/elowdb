@@ -241,7 +241,7 @@ export class LineDb {
         })
     }
 
-    async readByData<T extends LineDbAdapter>(
+    async readByFilter<T extends LineDbAdapter>(
         data: Partial<T>,
         collectionName?: string,
         options?: { strictCompare?: boolean; inTransaction?: boolean },
@@ -280,7 +280,7 @@ export class LineDb {
                 }
             }
 
-            const results = await adapter.readByData(
+            const results = await adapter.readByFilter(
                 data,
                 options,
                 this.#inTransaction || options?.inTransaction,
@@ -353,13 +353,13 @@ export class LineDb {
         const payload = async () => {
             const dataArray = Array.isArray(data) ? data : [data]
             for (const item of dataArray) {
-                // Генерируем id для новых записей
+                // Generate id for new records
                 if (!item.id || Number(item.id) <= -1) {
                     item.id = await this.nextId(item, collectionName)
                 } else {
-                    // check record do not exists
+                    // Check if record does not exist
                     const filter = { id: item.id } as Partial<T>
-                    const exists = await adapter.readByData(
+                    const exists = await adapter.readByFilter(
                         filter,
                         {
                             strictCompare: true,
@@ -369,7 +369,7 @@ export class LineDb {
                     )
                     if (exists.length > 0) {
                         throw new Error(
-                            `Запись с id ${item.id} уже существует в коллекции ${collectionName}`,
+                            `Record with id ${item.id} already exists in collection ${collectionName}`,
                         )
                     }
                 }
@@ -413,7 +413,7 @@ export class LineDb {
             }
             const updatedData: T[] = []
             for (const item of dataArray) {
-                const existingItem = await adapter.readByData(
+                const existingItem = await adapter.readByFilter(
                     item,
                     {
                         strictCompare: true,
@@ -637,7 +637,7 @@ export class LineDb {
             inTransaction: false,
         },
     ): Promise<CollectionChain<T>> {
-        const results = await this.readByData(data, collectionName, options)
+        const results = await this.readByFilter(data, collectionName, options)
         return chain(results)
     }
 
@@ -686,7 +686,7 @@ export class LineDb {
         if (options.leftFilter) {
             leftData =
                 typeof leftCollection === 'string'
-                    ? await this.readByData<T>(
+                    ? await this.readByFilter<T>(
                           options.leftFilter,
                           typeof leftCollection === 'string'
                               ? leftCollection
@@ -707,7 +707,7 @@ export class LineDb {
         if (options.rightFilter) {
             rightData =
                 typeof rightCollection === 'string'
-                    ? await this.readByData<U>(
+                    ? await this.readByFilter<U>(
                           options.rightFilter,
                           typeof rightCollection === 'string'
                               ? rightCollection

@@ -6,9 +6,15 @@
             "request": "launch",
             "name": "Debug Current Test File",
             "autoAttachChildProcesses": true,
-            "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ],
             "program": "${workspaceRoot}/node_modules/vitest/vitest.mjs",
-            "args": ["run", "${relativeFile}"],
+            "args": [
+                "run",
+                "${relativeFile}"
+            ],
             "smartStep": true,
             "console": "integratedTerminal"
         },
@@ -17,11 +23,19 @@
             "request": "launch",
             "name": "Debug Current Test",
             "autoAttachChildProcesses": true,
-            "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ],
             "program": "${workspaceRoot}/node_modules/vitest/vitest.mjs",
-            "args": ["run", "${relativeFile}", "-t", "${selectedText}"],
+            "args": [
+                "run",
+                "${relativeFile}",
+                "-t",
+                "${selectedText}"
+            ],
             "smartStep": true,
-            "env": {                
+            "env": {
                 "KEEP_TEST_FILES": "1"
             },
             "console": "integratedTerminal"
@@ -31,11 +45,17 @@
             "request": "launch",
             "name": "Debug Benchmark",
             "autoAttachChildProcesses": true,
-            "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ],
             "program": "${workspaceRoot}/node_modules/vitest/vitest.mjs",
-            "args": ["bench", "${relativeFile}"],
+            "args": [
+                "bench",
+                "${relativeFile}"
+            ],
             "smartStep": true,
             "console": "integratedTerminal"
         }
     ]
-} 
+}

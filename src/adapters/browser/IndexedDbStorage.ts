@@ -238,8 +238,7 @@ export class IndexedDbStorage<T> implements Adapter<T> {
             const decrypted = await this._decrypt(value, this._cypherKey as string)
             const error = decrypted as { error: string }
             if (error?.error) {
-            //   console.log("decrypted error:", `Decryption failed: ${error.error}`);
-              throw new Error(`Decryption failed: ${error.error}`)
+                throw new Error(`Decryption failed: ${error.error}`)
             }
             return this.parse(decrypted as string)
         }

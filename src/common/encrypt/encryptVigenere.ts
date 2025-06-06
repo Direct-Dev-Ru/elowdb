@@ -1,28 +1,25 @@
-
-
 import { extendKey, generateHMAC, getCharacterRange } from "../decrypt/decryptVigenere.js";
 
 /**
- * Шифрует текст с использованием шифра Виженера с поддержкой нескольких диапазонов символов.
- * @param text - Открытый текст (регистр сохраняется).
- * @param key - Ключ (только буквы, регистр неважен).
- * @returns Зашифрованный текст с HMAC для проверки целостности.
+ * Encrypts text using Vigenère cipher with support for multiple character ranges.
+ * @param text - Plain text (case is preserved).
+ * @param key - Key (letters only, case insensitive).
+ * @returns Encrypted text with HMAC for integrity verification.
  */
 export const encryptVigenere = (text: string, key: string): string => {
     if (!text || text.length === 0) return text;
 
-    if (!key) throw new Error("secret key must not be empty");
+    if (!key) throw new Error("Secret key must not be empty");
     if (typeof text !== "string" || typeof key !== "string") {
-        throw new Error("text and key must be strings");
+        throw new Error("Text and key must be strings");
     }
 
-    // Очистка ключа: оставляем только буквы и преобразуем в верхний регистр
+    // Clean key: keep only letters and convert to uppercase
     const cleanedKey = key.toUpperCase().replace(/[^A-Z]/g, "");
     if (!cleanedKey) throw new Error("Key must contain at least one letter");
 
-    // Генерация псевдослучайного ключа, если он слишком короткий
+    // Generate pseudorandom key if it's too short
     const extendedKey = extendKey(cleanedKey, text.length);
-    // console.log("encryption", extendedKey)
     let result = "";
     let keyIndex = 0;
 

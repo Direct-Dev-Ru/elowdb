@@ -249,10 +249,10 @@ describe('LineDb', () => {
                 timestamp: Date.now(),
             }
             await db.write<TestData>([data, data2], 'testData')
-            const result = await db.readByData<TestData>({ id: 1 }, 'testData')
+            const result = await db.readByFilter<TestData>({ id: 1 }, 'testData')
             expect(result).toHaveLength(1)
             expect(result[0]).toEqual(data)
-            const result2 = await db.readByData<TestData>(
+            const result2 = await db.readByFilter<TestData>(
                 { age: 25 },
                 'testData',
             )
@@ -277,7 +277,7 @@ describe('LineDb', () => {
             }
             await db.write<TestData>([data1, data2], 'testData')
 
-            const result = await db.readByData<TestData>(
+            const result = await db.readByFilter<TestData>(
                 { name: 'Test' },
                 'testData',
                 { strictCompare: false },
@@ -300,13 +300,13 @@ describe('LineDb', () => {
             await db.write<TestData>(data, 'testData')
 
             // Первое чтение - кэш пустой
-            const result1 = await db.readByData<TestData>({ id: 1 }, 'testData')
+            const result1 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
             expect(result1).toHaveLength(1)
             expect(result1[0]).toEqual(data)
             expect(db.actualCacheSize).toBe(1)
 
             // Второе чтение - должно быть из кэша
-            const result2 = await db.readByData<TestData>({ id: 1 }, 'testData')
+            const result2 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
             expect(result2).toHaveLength(1)
             expect(result2[0]).toEqual(data)
             expect(db.actualCacheSize).toBe(1)
@@ -354,18 +354,18 @@ describe('LineDb', () => {
             await db.write<TestData>(testData, 'testData')
             logTest(true, '--------write complete--------')
             // Читаем последние записи - они должны быть в кэше
-            const result1 = await db.readByData<TestData>(
+            const result1 = await db.readByFilter<TestData>(
                 { id: 11 },
                 'testData',
             )
             expect(result1).toHaveLength(1)
 
             // Читаем первые записи - они должны вытеснить старые из кэша
-            const result2 = await db.readByData<TestData>({ id: 1 }, 'testData')
+            const result2 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
             expect(result2).toHaveLength(1)
 
             // Проверяем, что вытесненная запись все еще доступна (но не из кэша)
-            const result3 = await db.readByData<TestData>({ id: 2 }, 'testData')
+            const result3 = await db.readByFilter<TestData>({ id: 2 }, 'testData')
             expect(result3).toHaveLength(1)
             // logTest(true, 'cache size', db.cacheMap)
         })
@@ -392,7 +392,7 @@ describe('LineDb', () => {
             await db.write<TestData>(data, 'testData')
 
             // Читаем из первой коллекции
-            const result1 = await db.readByData<TestData>({ id: 1 }, 'testData')
+            const result1 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
             expect(result1).toHaveLength(1)
 
             expect(db.actualCacheSize).toBe(1)
@@ -402,14 +402,14 @@ describe('LineDb', () => {
             await db.write<TestUser>(user, 'testUser')
 
             // Читаем из второй коллекции
-            const result2 = await db.readByData<TestUser>({ id: 1 }, 'testUser')
+            const result2 = await db.readByFilter<TestUser>({ id: 1 }, 'testUser')
 
             expect(result2).toHaveLength(1)
             expect(db.actualCacheSize).toBe(2)
             expect(result2[0]).toEqual(user)
 
             // Повторное чтение должно быть из кэша
-            const result3 = await db.readByData<TestData>({ id: 1 }, 'testData')
+            const result3 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
             expect(result3).toHaveLength(1)
             expect(db.actualCacheSize).toBe(2)
             // logTest(true, 'cache map', db.cacheMap)

@@ -3,32 +3,32 @@ import crypto from "crypto";
 
 
 /**
- * Дешифрует текст, зашифрованный шифром Виженера.
- * @param encryptedTextWithHMAC - Зашифрованный текст с HMAC.
- * @param key - Ключ (только буквы, регистр неважен).
- * @returns Расшифрованный текст.
+ * Decrypts text encrypted with Vigenère cipher.
+ * @param encryptedTextWithHMAC - Encrypted text with HMAC.
+ * @param key - Key (letters only, case insensitive).
+ * @returns Decrypted text.
  */
 export const decryptVigenere = (encryptedTextWithHMAC: string, key: string): string => {
   if (encryptedTextWithHMAC === '') return encryptedTextWithHMAC;
 
-  if (!key) throw new Error("decryption key must not be empty");
+  if (!key) throw new Error("Decryption key must not be empty");
   if (!encryptedTextWithHMAC || typeof encryptedTextWithHMAC !== "string" || typeof key !== "string") {
-    throw new Error("text and decryption key must be strings");
+    throw new Error("Text and decryption key must be strings");
   }
 
-  // Разделяем текст и HMAC
+  // Split text and HMAC
   const [encryptedText, hmac] = encryptedTextWithHMAC.split("|");
   if (!encryptedText || !hmac) throw new Error("Invalid encrypted text format");
 
-  // Проверяем HMAC
+  // Verify HMAC
   const isValid = verifyHMAC(encryptedText, key, hmac);
   if (!isValid) throw new Error("Integrity check failed");
 
-  // Очистка ключа: оставляем только буквы и преобразуем в верхний регистр
+  // Clean key: keep only letters and convert to uppercase
   const cleanedKey = key.toUpperCase().replace(/[^A-Z]/g, "");
   if (!cleanedKey) throw new Error("Key must contain at least one letter");
 
-  // Генерация расширенного ключа
+  // Generate extended key
   const extendedKey = extendKey(cleanedKey, encryptedText.length);
   // console.log("decryption", extendedKey)
   let result = "";

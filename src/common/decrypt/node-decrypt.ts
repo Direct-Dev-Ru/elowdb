@@ -86,7 +86,7 @@ function splitHeader(data: string) {
     const header = lines[0]?.split(';') || ''
     const cipherName = header[2]?.trim()
     if (cipherName !== 'AES256') {
-        throw new Error('unsupported cypher: ' + cipherName)
+        throw new Error('Unsupported cipher: ' + cipherName)
     }
     return lines.slice(1).join('')
 }
@@ -125,6 +125,6 @@ function checkDigest(key2: any, cryptedHmac: any, ciphertext: any) {
     hmac.update(ciphertext)
     const expectedMAC = hmac.digest()
     if (!crypto.timingSafeEqual(cryptedHmac, expectedMAC)) {
-        throw new Error('digests do not match - exiting')
+        throw new Error('Digests do not match - exiting')
     }
 }

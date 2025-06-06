@@ -1,5 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export interface JSONLFileOptions<T> {
+
+import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
+
+import { Cache } from './cache'
+
+export type FilterFunction<T> = (data: T) => boolean
+
+export interface PaginatedResult<T> {
+    data: T[]
+    total: number
+    limit: number
+    pages: number
+    page: number
+}
+
+export interface JSONLFileOptions<T extends { id: string | number }> {
     collectionName?: string
     decrypt?: (
         encryptedText: string,
@@ -13,6 +28,15 @@ export interface JSONLFileOptions<T> {
     idFn?: (data: T) => (string | number)[]
     decryptKey?: string // This key will be used to decrypt the file and stay it unencrypted (_cypherKey is null)
     skipInvalidLines?: boolean
+    log?: (...args: any[]) => void
+    logTest?: (...args: any[]) => void
+    indexedFields?: (keyof T)[]
+    parse?: (str: string) => T
+    stringify?: (data: T) => string
+    cache?: Cache<T>
+    cacheTTL?: number // 0 - отключить кэш, > 0 - время жизни кэша в миллисекундах
+    cacheLimit?: number // 0 - отключить кэш, > 0 - лимит записей в кэше
+    cacheCleanupInterval?: number
 }
 
 export interface LineDbAdapter {
@@ -24,6 +48,7 @@ export interface LineDbAdapterOptions {
     transactionId?: string
     debugTag?: string
     strictCompare?: boolean
+    filterType?: 'sift' | 'mongodb' | 'string' | 'filtrex' | 'object' | 'base'
 }
 
 export interface AdapterLine<T extends LineDbAdapter> {
@@ -34,8 +59,9 @@ export interface AdapterLine<T extends LineDbAdapter> {
     insert(data: T | T[], options?: LineDbAdapterOptions): Promise<void>
     update(
         data: Partial<T> | Partial<T>[],
+        filterData?: Partial<T>,
         options?: LineDbAdapterOptions,
-    ): Promise<void>
+    ): Promise<T[]>
     delete(
         data: Partial<T> | Partial<T>[],
         options?: LineDbAdapterOptions,
@@ -54,6 +80,7 @@ export interface ITransaction {
     rollback: boolean
     backupFile: string
     doNotDeleteBackupFile: boolean
+    mutex: RWMutex
 
     /**
      * Очищает таймаут транзакции
