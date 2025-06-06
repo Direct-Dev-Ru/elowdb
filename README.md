@@ -1,4 +1,4 @@
-# enclowdb (<https://github.com/direct-dev-ru/elowdb>)
+# @direct-dev-ru/linedb (<https://github.com/direct-dev-ru/linedb>)
 
 ## forked from lowdb project (<https://github.com/typicode/lowdb>)
 
@@ -56,13 +56,13 @@ It's that simple. `db.data` is just a JavaScript object, no magic.
 ## Установка
 
 ```sh
-npm install enclowdb
+npm install @direct-dev-ru/linedb
 ```
 
 ## использование
 
 ```js
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 // Read or create db.json
 const defaultData = { posts: [] }
@@ -105,8 +105,8 @@ db.data.messages.push(1) // ❌ TypeScript error
 You can extend lowdb with Lodash (or other libraries). To be able to extend it, we're not using `JSONPreset` here. Instead, we're using lower components.
 
 ```ts
-import { Low } from 'lowdb'
-import { JSONFile } from 'lowdb/node'
+import { Low } from '@direct-dev-ru/linedb'
+import { JSONFile } from '@direct-dev-ru/linedb/node'
 import lodash from 'lodash'
 
 type Post = {
@@ -161,8 +161,8 @@ Lowdb has two classes (for asynchronous and synchronous adapters).
 #### `new Low(adapter, defaultData)`
 
 ```js
-import { Low } from 'lowdb'
-import { JSONFile } from 'lowdb/node'
+import { Low } from '@direct-dev-ru/linedb'
+import { JSONFile } from '@direct-dev-ru/linedb/node'
 
 const db = new Low(new JSONFile('file.json'), {})
 await db.read()
@@ -172,8 +172,8 @@ await db.write()
 #### `new LowSync(adapterSync, defaultData)`
 
 ```js
-import { LowSync } from 'lowdb'
-import { JSONFileSync } from 'lowdb/node'
+import { LowSync } from '@direct-dev-ru/linedb'
+import { JSONFileSync } from '@direct-dev-ru/linedb/node'
 
 const db = new LowSync(new JSONFileSync('file.json'), {})
 db.read()
@@ -236,7 +236,7 @@ db.data = { key: 'value' }
 ### 1. Работа с пользователями и аутентификацией
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface User {
   id: string
@@ -264,7 +264,7 @@ const user = db.data.users.find(u => u.username === 'admin')
 ### 2. Управление задачами (Todo List)
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface Task {
   id: string
@@ -295,7 +295,7 @@ await db.update(({ tasks }) => {
 ### 3. Блог с комментариями
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface Post {
   id: string
@@ -330,7 +330,7 @@ await db.update(({ posts }) => {
 ### 4. Система рейтингов и отзывов
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface Product {
   id: string
@@ -371,7 +371,7 @@ const avgRating = db.data.products
 ### 5. Система уведомлений
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface Notification {
   id: string
@@ -404,7 +404,7 @@ await db.update(({ notifications }) => {
 ### 6. Система заказов
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface Order {
   id: string
@@ -449,7 +449,7 @@ await db.update(({ orders }) => {
 ### 7. Система чата
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface Message {
   id: string
@@ -484,7 +484,7 @@ const chatHistory = db.data.messages
 ### 8. Система настроек пользователя
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface UserSettings {
   userId: string
@@ -521,7 +521,7 @@ await db.update(({ settings }) => {
 ### 9. Система статистики
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface Statistic {
   id: string
@@ -560,7 +560,7 @@ const recentStats = db.data.statistics
 ### 10. Система кэширования
 
 ```typescript
-import { JSONFilePreset } from 'lowdb/node'
+import { JSONFilePreset } from '@direct-dev-ru/linedb/node'
 
 interface CacheItem {
   key: string
@@ -598,8 +598,8 @@ await db.update(({ cache }) => {
 ### 1. Использование BSONFile (бинарный формат)
 
 ```typescript
-import { Low } from 'lowdb'
-import { BSONFile } from 'lowdb/node'
+import { Low } from '@direct-dev-ru/linedb'
+import { BSONFile } from '@direct-dev-ru/linedb/node'
 
 interface User {
   id: string
@@ -623,8 +623,8 @@ await db.update((users) => {
 ### 2. Использование YAMLFile (YAML формат)
 
 ```typescript
-import { Low } from 'lowdb'
-import { YAMLFile } from 'lowdb/node'
+import { Low } from '@direct-dev-ru/linedb'
+import { YAMLFile } from '@direct-dev-ru/linedb/node'
 
 interface Config {
   server: {
@@ -663,8 +663,8 @@ console.log(db.data.server.port)
 ### 3. Использование с шифрованием
 
 ```typescript
-import { Low } from 'lowdb'
-import { DataFile } from 'lowdb/node'
+import { Low } from '@direct-dev-ru/linedb'
+import { DataFile } from '@direct-dev-ru/linedb/node'
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
 
 const algorithm = 'aes-256-cbc'
@@ -689,8 +689,8 @@ await db.write() // Данные будут зашифрованы при зап
 ### 4. Использование Memory адаптера (для тестов)
 
 ```typescript
-import { Low } from 'lowdb'
-import { Memory } from 'lowdb'
+import { Low } from '@direct-dev-ru/linedb'
+import { Memory } from '@direct-dev-ru/linedb'
 
 interface TestData {
   items: string[]
@@ -709,8 +709,8 @@ console.log(db.data.items) // ['test']
 ### 5. Использование LocalStorage в браузере
 
 ```typescript
-import { LowSync } from 'lowdb'
-import { LocalStorage } from 'lowdb/browser'
+import { LowSync } from '@direct-dev-ru/linedb'
+import { LocalStorage } from '@direct-dev-ru/linedb/browser'
 
 interface BrowserData {
   theme: 'light' | 'dark'
@@ -736,8 +736,8 @@ db.update(({ settings }) => {
 ### 6. Использование SessionStorage в браузере
 
 ```typescript
-import { LowSync } from 'lowdb'
-import { SessionStorage } from 'lowdb/browser'
+import { LowSync } from '@direct-dev-ru/linedb'
+import { SessionStorage } from '@direct-dev-ru/linedb/browser'
 
 interface SessionData {
   cart: {
@@ -760,8 +760,8 @@ db.update(({ cart }) => {
 ### 7. Использование UpdLow (расширенная версия Low)
 
 ```typescript
-import { UpdLow } from 'lowdb'
-import { JSONFile } from 'lowdb/node'
+import { UpdLow } from '@direct-dev-ru/linedb'
+import { JSONFile } from '@direct-dev-ru/linedb/node'
 
 interface User {
   id: string
@@ -791,9 +791,9 @@ db.stopSmartRefresh()
 ### 8. Комбинированное использование адаптеров
 
 ```typescript
-import { Low } from 'lowdb'
-import { JSONFile } from 'lowdb/node'
-import { LocalStorage } from 'lowdb/browser'
+import { Low } from '@direct-dev-ru/linedb'
+import { JSONFile } from '@direct-dev-ru/linedb/node'
+import { LocalStorage } from '@direct-dev-ru/linedb/browser'
 
 // Определение фабрики адаптеров
 const createAdapter = (type: 'node' | 'browser') => {
@@ -816,8 +816,8 @@ const browserDb = new LowSync(browserAdapter, {})
 ### 9. Создание кастомного адаптера для работы с API
 
 ```typescript
-import { Low } from 'lowdb'
-import { Adapter } from 'lowdb'
+import { Low } from '@direct-dev-ru/linedb'
+import { Adapter } from '@direct-dev-ru/linedb'
 
 class APIDataAdapter implements Adapter<Data> {
   private url: string
@@ -856,8 +856,8 @@ const db = new Low(adapter, {})
 ### 10. Использование с компрессией данных
 
 ```typescript
-import { Low } from 'lowdb'
-import { DataFile } from 'lowdb/node'
+import { Low } from '@direct-dev-ru/linedb'
+import { DataFile } from '@direct-dev-ru/linedb/node'
 import { gzipSync, gunzipSync } from 'zlib'
 import { promisify } from 'util'
 
@@ -884,8 +884,8 @@ await db.write() // Данные будут сжаты при записи
 ### LowWithLodash
 
 ```typescript
-import { LowWithLodash } from 'encLowdb'
-import { JSONFile } from 'enclowdb/adapters/node/JSONFile'
+import { LowWithLodash } from '@direct-dev-ru/linedb'
+import { JSONFile } from '@direct-dev-ru/linedb/node'
 
 interface User {
   id: number
@@ -950,8 +950,8 @@ await db.update(data => {
 ### UpdLowWithLodash
 
 ```typescript
-import { UpdLowWithLodash } from 'encLowdb'
-import { JSONFile } from 'enclowdb/adapters/node/JSONFile'
+import { UpdLowWithLodash } from '@direct-dev-ru/linedb'
+import { JSONFile } from '@direct-dev-ru/linedb/node'
 
 interface Post {
   id: number
@@ -1061,7 +1061,7 @@ db.stopSmartRefresh()
 Adapters for reading and writing JSON files.
 
 ```js
-import { JSONFile, JSONFileSync } from 'lowdb/node'
+import { JSONFile, JSONFileSync } from '@direct-dev-ru/linedb/node'
 
 new Low(new JSONFile(filename), {})
 new LowSync(new JSONFileSync(filename), {})
@@ -1072,7 +1072,7 @@ new LowSync(new JSONFileSync(filename), {})
 In-memory adapters. Useful for speeding up unit tests. See [`src/examples/`](src/examples) directory.
 
 ```js
-import { Memory, MemorySync } from 'lowdb'
+import { Memory, MemorySync } from '@direct-dev-ru/linedb'
 
 new Low(new Memory(), {})
 new LowSync(new MemorySync(), {})
@@ -1083,7 +1083,7 @@ new LowSync(new MemorySync(), {})
 Synchronous adapter for `window.localStorage` and `window.sessionStorage`.
 
 ```js
-import { LocalStorage, SessionStorage } from 'lowdb/browser'
+import { LocalStorage, SessionStorage } from '@direct-dev-ru/linedb/browser'
 new LowSync(new LocalStorage(name), {})
 new LowSync(new SessionStorage(name), {})
 ```
@@ -1099,7 +1099,7 @@ Adapters for reading and writing text. Useful for creating custom adapters.
 Adapters for easily supporting other data formats or adding behaviors (encrypt, compress...).
 
 ```js
-import { DataFile } from 'lowdb/node'
+import { DataFile } from '@direct-dev-ru/linedb/node'
 new DataFile(filename, {
     parse: YAML.parse,
     stringify: YAML.stringify,
@@ -1147,7 +1147,7 @@ class SyncAdapter {
 For example, let's say you have some async storage and want to create an adapter for it:
 
 ```js
-import { Low } from 'lowdb'
+import { Low } from '@direct-dev-ru/linedb'
 import { api } from './AsyncStorage'
 
 class CustomAsyncAdapter {
@@ -1179,8 +1179,8 @@ To create an adapter for another format than JSON, you can use `TextFile` or `Te
 For example:
 
 ```js
-import { Adapter, Low } from 'lowdb'
-import { TextFile } from 'lowdb/node'
+import { Adapter, Low } from '@direct-dev-ru/linedb'
+import { TextFile } from '@direct-dev-ru/linedb/node'
 import YAML from 'yaml'
 
 class YAMLFile {

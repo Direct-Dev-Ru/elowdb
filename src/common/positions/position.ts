@@ -14,12 +14,12 @@ import { LineDbAdapter } from '../../core/LineDbv2'
 
 export class FilePosition {
     private _position: number
-    private _isDeleted: boolean
-    private _partition: string | number
+    private _isDeleted?: boolean
+    private _partition?: string | number
     constructor(
         position: number,
-        isDeleted: boolean = false,
-        partition: string | number = crypto.randomUUID(),
+        isDeleted?: boolean,
+        partition?: string | number,
     ) {
         this._position = position
         this._isDeleted = isDeleted

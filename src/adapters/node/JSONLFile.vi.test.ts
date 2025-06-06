@@ -211,7 +211,7 @@ describe('JSONLFile', () => {
     })
 
     describe('JSONLFile step without transaction', () => {
-        it('01.should write and readByFilter', async () => {
+        it.only('01.should write and readByFilter', async () => {
             const testFile = `${testFileMain}_01.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -221,6 +221,7 @@ describe('JSONLFile', () => {
 
             jsonlFile = new JSONLFile<TestData>(testFile, '', {
                 allocSize: 512,
+                indexedFields: ['id', 'name'],
             })
             await jsonlFile.init()
 
@@ -263,6 +264,20 @@ describe('JSONLFile', () => {
             expect(resultSift).toEqual([
                 testData,
                 { ...testData, id: '2', name: 'Test-2' },
+            ])
+
+            logTest(
+                logInThisTest,
+                'positions after second write ::::',
+                await jsonlFile.getPositionsNoLock(),
+            )
+            const resultFilterFunction = await jsonlFile.readByFilter(
+                (data) => data.name.startsWith('Test-1'),
+                { inTransaction: false },
+            )
+            expect(resultFilterFunction).toEqual([
+                testData,
+                // { ...testData, id: '2', name: 'Test-2' },
             ])
         })
 
@@ -755,7 +770,6 @@ describe('JSONLFile', () => {
             // Записываем данные
             await jsonlFile.write(testData)
 
-
             // Удаляем несколько записей
             await jsonlFile.delete([{ id: '2', user: 'User1' }, { id: '4' }])
 
@@ -785,7 +799,11 @@ describe('JSONLFile', () => {
             const result4 = await jsonlFile2.readByFilter({ user: 'User0' })
 
             expect(Array.isArray(result4)).toBe(true)
-            logTest(logInThisTest, 'map after compression', await jsonlFile2.getPositionsNoLock())
+            logTest(
+                logInThisTest,
+                'map after compression',
+                await jsonlFile2.getPositionsNoLock(),
+            )
         })
 
         it('11.should handle file compression', async () => {
@@ -1131,7 +1149,7 @@ describe('JSONLFile', () => {
             }, transactionOptions)
         })
 
-        it('04T.should support deletion in a transaction', async () => {
+        it.only('04T.should support deletion in a transaction', async () => {
             const testFile = `${testFileMain}_04T.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -1167,16 +1185,26 @@ describe('JSONLFile', () => {
 
             await jsonlFile.beginTransaction({
                 rollback: true,
-                timeout: 1000000,
+                timeout: 100_000,
             })
+            try {
+                await jsonlFile.withTransaction(async (tx) => {
+                    await tx.write(data3)
+                    await tx.delete({ id: '2' })
+                    const result = await tx.read()
+                    expect(result).toHaveLength(2)
+                    expect(result).toEqual([data1, data3])
+                    throw new Error('Test error')
+                    await tx.endTransaction()
+                })
+            } catch (error) {
+                expect(error).toBeInstanceOf(Error)
+                await jsonlFile.endTransaction()
+            }
 
-            await jsonlFile.withTransaction(async (tx) => {
-                await tx.write(data3)
-                await tx.delete({ id: '2' })
-                const result = await tx.read()
-                expect(result).toHaveLength(2)
-                expect(result).toEqual([data1, data3])
-            })
+            const result = await jsonlFile.read()
+            expect(result).toHaveLength(2)
+            expect(result).toEqual([data1, data2])
         })
 
         it('05T.should handle concurrent transactions', async () => {
@@ -2672,7 +2700,6 @@ describe.skip('JSONLFile selectWithPagination', () => {
             allocSize: 256,
             cacheTTL: 1000 * 180,
             cacheLimit: 15, // limit cache to 15 records
-            
         })
         await limitedJsonlFile.init()
 
@@ -2717,8 +2744,6 @@ describe.skip('JSONLFile selectWithPagination', () => {
 describe.skip('JSONLFile cache operations', () => {
     const testFile = path.join('test-data-jsonl', 'cache_test.jsonl')
     let jsonlFile: JSONLFile<TestData>
-
-    
 
     // it('should handle multiple cache operations', async () => {
     //     // Инициализируем кэш

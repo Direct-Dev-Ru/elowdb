@@ -47,6 +47,7 @@ import {
     createSafeSiftFilter,
     isMongoDbLikeFilter,
 } from '../../common/utils/sift'
+import { capitalize } from '../../common/utils/strings'
 import { JSONLTransaction } from '../../core/Transaction'
 import { defNodeDecrypt, defNodeEncrypt } from './TextFile.js'
 
@@ -135,10 +136,94 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         this.#allocSize = options.allocSize || 256
         this.#parse = options.parse || JSON.parse
         this.#stringify = options.stringify || JSON.stringify
-        this.#decrypt = options.decrypt || defNodeDecrypt
-        this.#encrypt = options.encrypt || defNodeEncrypt
 
-        // Создаем кэш только если cacheTTL > 0 или передан пользовательский кэш
+        const _decrypt = options?.decrypt || defNodeDecrypt
+        const _encrypt = options?.encrypt || defNodeEncrypt
+
+        // resulting decryption function
+        this.#decrypt = async (
+            _text,
+            _cypherKey = this.#cypherKey,
+        ): Promise<string | { error: string }> => {
+            const texttoDecrypt = Buffer.from(_text, 'base64').toString('utf8')
+            const decrypted = await _decrypt(texttoDecrypt, _cypherKey)
+            if (typeof decrypted !== 'string') {
+                return { error: decrypted.error }
+            }
+            return decrypted
+        }
+        // resulting encryption function
+        this.#encrypt = async (
+            _text,
+            _cypherKey = this.#cypherKey,
+        ): Promise<string | { error: string }> => {
+            const encrypted = await _encrypt(_text, _cypherKey)
+            if (typeof encrypted !== 'string') {
+                return { error: encrypted.error }
+            }
+            return Buffer.from(encrypted, 'utf8').toString('base64')
+        }
+
+        // resulting id function for building indexes
+        if (
+            options.idFn ||
+            (this.#constructorOptions.indexedFields &&
+                this.#constructorOptions.indexedFields.length > 0)
+        ) {
+            let additionalIndexFunction = (data: T) => {
+                return [`byId:${data.id}`]
+            }
+            if (this.#constructorOptions.indexedFields) {
+                const indexedFields =
+                    this.#constructorOptions.indexedFields
+                        .filter((field) => field !== 'id')
+                        .join(',') || ''
+                if (indexedFields) {
+                    const fullIndexedFields = [
+                        ...this.#constructorOptions.indexedFields,
+                        'id',
+                    ]
+
+                    additionalIndexFunction = (data) => {
+                        const objectWithOnlyIndexedFields = Object.fromEntries(
+                            Object.entries(data).filter(([key]) =>
+                                fullIndexedFields.includes(key as keyof T),
+                            ),
+                        )
+                        const stringifiedObject = JSON.stringify(
+                            objectWithOnlyIndexedFields,
+                            Object.keys(objectWithOnlyIndexedFields).sort(),
+                        )
+                        // const hash = crypto
+                        //     .createHash('sha256')
+                        //     .update(stringifiedObject)
+                        //     .digest('hex')
+
+                        return [
+                            ...indexedFields
+                                .split(',')
+                                .map(
+                                    (field) =>
+                                        `by${capitalize(field)}:${
+                                            data[field as keyof T]
+                                        }`,
+                                ),
+                            `byId:${data.id}`,
+                            `byIndexedFields:${stringifiedObject}`,
+                            // `byIndexedHash:${hash}`,
+                        ]
+                    }
+                }
+            }
+            this.#idFn = (data) => {
+                return [
+                    ...(options.idFn ? options.idFn(data) : []),
+                    ...additionalIndexFunction(data),
+                ]
+            }
+        }
+
+        // Create cache only if cacheTTL > 0 or user cache is passed
         if (
             (options?.cacheTTL || 0) !== 0 ||
             (options?.cacheLimit || 0) !== 0
@@ -793,8 +878,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                             obj,
                             new FilePosition(
                                 position,
-                                false,
-                                crypto.randomUUID(),
+                                // false,
+                                // crypto.randomUUID(),
                             ),
                             this.#idFn,
                         )
@@ -1459,8 +1544,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                                       ) as FilePosition)
                                     : new FilePosition(
                                           writePosition,
-                                          false,
-                                          crypto.randomUUID(),
+                                          //   false,
+                                          //   crypto.randomUUID(),
                                       )
 
                             for (const index of indexesToAdd) {
@@ -1542,7 +1627,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     await fileHandleAppend.write(resultLine)
                     await filePositions.setPositionByDataNoLock(
                         item,
-                        new FilePosition(position, false, crypto.randomUUID()),
+                        new FilePosition(
+                            position,
+                            // false, crypto.randomUUID()
+                        ),
                         this.#idFn,
                     )
                     position += resultLine.length
@@ -1616,6 +1704,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     }
                 }
                 // return filterFunction ? records.filter(filterFunction) : records
+                if (positions.size === 0) {
+                    return []
+                }
                 return await this.#readRecords(positions)
             }
             if (this.#inTransactionMode || options.inTransaction) {
@@ -1701,6 +1792,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         let doIndexedSearch = false
 
         if (filter instanceof Function) {
+            doIndexedSearch = true
+            filterFunctionForIndexedSearch = filter
             filterFunction = filter
             filterData = {}
         } else {
@@ -1780,7 +1873,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         }
 
         // Сначала пробуем найти по индексу
-        if (doIndexedSearch && !(filter instanceof Function)) {
+        if (doIndexedSearch) {
             let indexedResults: T[] = []
             try {
                 indexedResults = await this.#readByIndexedData(

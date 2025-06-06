@@ -1,6 +1,6 @@
 {
-    "name": "enclowdb",
-    "version": "7.0.3",
+    "name": "@direct-dev-ru/linedb",
+    "version": "1.0.10",
     "description": "Tiny local JSON database for Node, Electron and the browser (with optional encoding)",
     "keywords": [
         "database",
@@ -17,13 +17,13 @@
         "browser",
         "esm"
     ],
-    "homepage": "https://github.com/direct-dev-ru/elowdb#readme",
+    "homepage": "https://github.com/direct-dev-ru/linedb#readme",
     "bugs": {
-        "url": "https://github.com/direct-dev-ru/elowdb/issues"
+        "url": "https://github.com/direct-dev-ru/linedb/issues"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/direct-dev-ru/elowdb.git"
+        "url": "git+https://github.com/direct-dev-ru/linedb.git"
     },
     "license": "MIT",
     "author": "Direct-Dev-Ru <info@direct-dev.ru> forked from Typicode <typicode@gmail.com>",
