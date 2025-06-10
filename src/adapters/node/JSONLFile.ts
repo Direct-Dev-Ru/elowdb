@@ -2216,6 +2216,127 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         return allUpdatedRecords
     }
 
+    async #trySelectByOneField(
+        filter?:
+            | FilterFunction<T>
+            | Partial<T>
+            | Record<string, unknown>
+            | string,
+        options?: LineDbAdapterOptions,
+    ): Promise<T[]> {
+        // Если фильтр - объект с одним полем id (или из indexedFields), используем прямой доступ к индексу
+        const fieldPattern =
+            this.#constructorOptions.indexedFields?.length || 0 > 0
+                ? this.#constructorOptions.indexedFields?.join('|') || 'id'
+                : 'id'
+
+        if (
+            !(
+                (typeof filter === 'object' &&
+                    !Array.isArray(filter) &&
+                    Object.keys(filter).length === 1) ||
+                typeof filter === 'string'
+            )
+        ) {
+            return []
+        }
+        let trySelectByOneFieldFilter = false
+        let filterField = ''
+        let filterValue: string | number | boolean = ''
+        let newFilter: Partial<T> | Record<string, unknown> = {}
+        if (typeof filter === 'string') {
+            // Проверяем строку фильтра на соответствие шаблону field===value или field === value
+            // Значение может быть числовым или строковым
+
+            const fieldMatch = filter.match(
+                new RegExp(`(${fieldPattern})\\s*===?\\s*(['"]?[^'"]+['"]?)`),
+            )
+            if (fieldMatch) {
+                filterField = fieldMatch[1]
+                // Проверяем наличие кавычек в значении
+                const hasQuotes =
+                    fieldMatch[2].startsWith('"') ||
+                    fieldMatch[2].startsWith("'")
+                filterValue = hasQuotes
+                    ? fieldMatch[2].slice(1, -1)
+                    : Number(fieldMatch[2])
+                newFilter = { [filterField]: filterValue }
+                trySelectByOneFieldFilter = true
+            }
+        } else {
+            const keyName = Object.keys(filter as Record<string, unknown>)[0]
+            const valueOfKey = (filter as Record<string, unknown>)[keyName]
+            if (
+                typeof filter === 'object' &&
+                typeof valueOfKey === 'object' &&
+                valueOfKey !== null &&
+                '$eq' in (valueOfKey as Record<string, unknown>)
+            ) {
+                trySelectByOneFieldFilter = (
+                    this.#constructorOptions.indexedFields || []
+                ).some(
+                    (field) =>
+                        field in ((filter as Record<string, unknown>) || {}),
+                )
+                if (trySelectByOneFieldFilter) {
+                    filterField = keyName
+                    const condition = valueOfKey as Record<
+                        string,
+                        string | number
+                    >
+                    filterValue = condition?.$eq
+                    newFilter = {
+                        [filterField]: filterValue,
+                    }
+                }
+            }
+
+            if (typeof filter === 'object' && typeof valueOfKey !== 'object') {
+                trySelectByOneFieldFilter = (
+                    this.#constructorOptions.indexedFields || []
+                ).some(
+                    (field) =>
+                        field in ((filter as Record<string, unknown>) || {}),
+                )
+                if (trySelectByOneFieldFilter) {
+                    filterField = keyName
+                    filterValue = valueOfKey as string | number | boolean
+                    newFilter = {
+                        [filterField]: valueOfKey,
+                    }
+                }
+            }
+        }
+
+        if (trySelectByOneFieldFilter) {
+            const filePositions = await LinePositionsManager.getFilePositions(
+                this.#filename.toString(),
+            )
+
+            const payload = async () => {
+                const positions = await filePositions.getPositionByRecordNoLock(
+                    // { id: (filter as Record<string, unknown>).id as string },
+                    newFilter,
+                    (data) => [`by${capitalize(filterField)}:${filterValue}`],
+                )
+                if (positions.size > 0) {
+                    const result = await this.#readRecords(positions)
+                    if (result.length > 0) {
+                        // Сохраняем в кэш только если он включен
+                        // this.#setToCache(cacheKey, result, result.length)
+                        return result
+                    }
+                }
+                return []
+            }
+            return this.#inTransactionMode || (options?.inTransaction ?? false)
+                ? await payload()
+                : await filePositions.getMutex().withReadLock(payload)
+        }
+
+        return []
+    }
+
     async select(
         filter?:
             | FilterFunction<T>
@@ -2244,56 +2365,13 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         }
         this.#transactionGuard(options)
 
-        // Если фильтр - объект с одним полем id, используем прямой доступ к индексу
-        if (
-            (typeof filter === 'object' &&
-                !Array.isArray(filter) &&
-                Object.keys(filter).length === 1 &&
-                'id' in filter) ||
-            typeof filter === 'string'
-        ) {
-            if (typeof filter === 'string') {
-                // Проверяем строку фильтра на соответствие шаблону id===value или id === value
-                // Значение id может быть числовым или строковым
-                const idMatch = filter.match(/id\s*===?\s*(['"]?[^'"]+['"]?)/)
-                if (idMatch) {
-                    // Проверяем наличие кавычек в значении id
-                    const hasQuotes =
-                        idMatch[1].startsWith('"') || idMatch[1].startsWith("'")
-                    const idValue = hasQuotes
-                        ? idMatch[1].slice(1, -1)
-                        : Number(idMatch[1])
-                    filter = { id: idValue }
-                }
-            }
-
-            if (
-                typeof filter === 'object' &&
-                typeof filter.id === 'object' &&
-                '$eq' in (filter?.id || {})
-            ) {
-                filter = {
-                    id: (filter as Record<string, { $eq: string | number }>).id
-                        ?.$eq,
-                }
-            }
-            const filePositions = await LinePositionsManager.getFilePositions(
-                this.#filename.toString(),
-            )
-            const positions = await filePositions.getPositionByDataNoLock(
-                { id: (filter as Record<string, unknown>).id as string },
-                (data) => [`byId:${data.id}`],
-            )
-            if (positions.size > 0) {
-                const result = await this.#readRecords(positions)
-                if (result.length > 0) {
-                    // Сохраняем в кэш только если он включен
-                    this.#setToCache(cacheKey, result, result.length)
-                    return result
-                }
-            }
+        const tryByOneFieldFilterResult = await this.#trySelectByOneField(
+            filter,
+            options,
+        )
+        if (tryByOneFieldFilterResult.length > 0) {
+            return tryByOneFieldFilterResult
         }
-
         return filter
             ? await this.readByFilter(filter, options)
             : await this.read()

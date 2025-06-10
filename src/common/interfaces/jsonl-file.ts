@@ -27,6 +27,7 @@ export interface JSONLFileOptions<T extends { id: string | number }> {
     allocSize?: number
     idFn?: (data: T) => (string | number)[]
     decryptKey?: string // This key will be used to decrypt the file and stay it unencrypted (_cypherKey is null)
+    encryptKeyForLineDb?: string // This key will be used then adapter is used inside LineDb init method
     skipInvalidLines?: boolean
     log?: (...args: any[]) => void
     logTest?: (...args: any[]) => void

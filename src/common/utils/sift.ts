@@ -211,10 +211,11 @@ export function createSafeSiftFilter<T>(
             for (const key in obj) {
                 if (key.startsWith('$')) {
                     if (Array.isArray(obj[key])) {
-                        for (const item of obj[key]) {
+                        const arrObjs = obj[key] as Record<string, unknown>[]
+                        for (const item of arrObjs ) {
                             if (
                                 typeof item === 'object' &&
-                                !checkFields(item as Record<string, unknown>)
+                                !checkFields(item)
                             ) {
                                 return false
                             }

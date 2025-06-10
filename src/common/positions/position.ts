@@ -35,14 +35,14 @@ export class FilePosition {
     }
 
     get isDeleted(): boolean {
-        return this._isDeleted
+        return this._isDeleted as boolean
     }
     set isDeleted(isDeleted: boolean) {
         this._isDeleted = isDeleted
     }
 
     get partition(): string | number {
-        return this._partition
+        return this._partition as string | number
     }
 
     set partition(partition: string | number) {
@@ -223,6 +223,21 @@ export class FilePositions {
         idFn?: (data: T) => (string | number)[],
     ): Promise<Map<string | number, (number | FilePosition)[]>> {
         const ids = idFn ? idFn(data) : [`byId:${data.id}`]
+        const result = new Map<string | number, (number | FilePosition)[]>()
+        for (const id of ids) {
+            const positions = this.positions.get(id)
+            if (positions) {
+                result.set(id, positions)
+            }
+        }
+        return result
+    }
+
+    async getPositionByRecordNoLock<T extends Record<string, unknown>>(
+        data: T,
+        idFn: (data: T) => (string | number)[] = (data) => [`byId:${data.id}`],
+    ): Promise<Map<string | number, (number | FilePosition)[]>> {
+        const ids = idFn(data)
         const result = new Map<string | number, (number | FilePosition)[]>()
         for (const id of ids) {
             const positions = this.positions.get(id)

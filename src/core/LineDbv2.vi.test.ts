@@ -1,12 +1,9 @@
-import { TestData } from '../../common/interfaces/test-data.js'
-import { describe, it, expect, beforeEach, afterEach, vi, Test } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, } from 'vitest'
 import { LineDb, LineDbAdapter } from './LineDbv2.js'
 import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { chain } from 'lodash'
-import { log } from 'node:console'
-import e from 'express'
+import { logTest } from '../common/utils/log.js'
 
 interface TestData extends LineDbAdapter {
     id: number | string
@@ -24,12 +21,6 @@ interface TestUser extends LineDbAdapter {
     isActive: boolean
     role: string
     timestamp: number
-}
-
-function logTest(log: boolean = true, ...args: unknown[]): void {
-    if (process.env.NODE_ENV === 'test' && log) {
-        console.log(...args)
-    }
 }
 
 describe('LineDb', () => {

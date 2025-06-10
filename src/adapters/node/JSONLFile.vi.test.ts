@@ -11,7 +11,9 @@ import {
     JSONLFileOptions,
     LineDbAdapterOptions,
 } from '../../common/interfaces/jsonl-file.js'
-import { only, skip } from 'node:test'
+
+const sortFn = (a: TestData, b: TestData) =>
+    (a.id as string).localeCompare(b.id as string)
 
 function getRandom(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1) + min)
@@ -211,7 +213,7 @@ describe('JSONLFile', () => {
     })
 
     describe('JSONLFile step without transaction', () => {
-        it.only('01.should write and readByFilter', async () => {
+        it('01.should write and readByFilter', async () => {
             const testFile = `${testFileMain}_01.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -703,8 +705,7 @@ describe('JSONLFile', () => {
             // Write all data concurrently
             await Promise.all(testData.map((data) => jsonlFile.write(data)))
             const position = await jsonlFile.getPositionsNoLock()
-            const sortFn = (a: TestData, b: TestData) =>
-                (a.id as string).localeCompare(b.id as string)
+
             const result = (await jsonlFile.read()).sort(sortFn)
 
             expect(result).toEqual(testData.sort(sortFn))
@@ -861,15 +862,11 @@ describe('JSONLFile', () => {
                     .length,
             )
             expect(
-                result.sort((a, b) =>
-                    (a.id as string).localeCompare(b.id as string),
-                ),
+                result.sort(sortFn),
             ).toEqual(
                 testData
                     .filter((item) => item.id !== '2' && item.id !== '4')
-                    .sort((a, b) =>
-                        (a.id as string).localeCompare(b.id as string),
-                    ),
+                    .sort(sortFn),
             )
         })
 
@@ -936,7 +933,7 @@ describe('JSONLFile', () => {
             expect(Array.isArray(result4)).toBe(true)
         })
 
-        it('13.should process select method with different filter types', async () => {
+        it.only('13.should process select method with different filter types', async () => {
             const testFile = `${testFileMain}_13.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -946,7 +943,7 @@ describe('JSONLFile', () => {
 
             const jsonlFile = new JSONLFile<TestData>(testFile, '', {
                 allocSize: 256 * 1,
-                indexedFields: ['id'],
+                indexedFields: ['id', 'user', 'name'],
             })
             await jsonlFile.init()
 
@@ -964,16 +961,48 @@ describe('JSONLFile', () => {
             await jsonlFile.write(testData)
 
             const result = await jsonlFile.select()
-            expect(result).toEqual(testData)
+            expect(result.sort(sortFn)).toEqual(testData.sort(sortFn))
 
             const result2 = await jsonlFile.select(
-                { id: { $eq: '50' } },
+                // { id: { $eq: '50' } },
+                `id === "50"`,
                 {
-                    filterType: 'mongodb',
+                    filterType: 'filtrex',
                     inTransaction: false,
                 },
             )
-            expect(result2).toEqual(testData.filter((data) => data.id === '50'))
+            expect(result2.sort(sortFn)).toEqual(
+                testData.filter((data) => data.id === '50'),
+            )
+
+            const result2_1 = await jsonlFile.select(
+                // { id: { $eq: '50' } },
+                `user === "User1"`,
+                {
+                    filterType: 'filtrex',
+                    inTransaction: false,
+                },
+            )
+            expect(result2_1.sort(sortFn)).toEqual(
+                testData.filter((data) => data.user === 'User1').sort(sortFn),
+            )
+
+            const result3 = await jsonlFile.select({ user: { $eq: 'User0' } }, {
+                filterType: 'mongodb',
+                inTransaction: false,
+            })
+            expect(result3.sort(sortFn)).toEqual(
+                testData.filter((data) => data.user === 'User0').sort(sortFn),
+            )
+
+            const nameValueToFilter = "Test1"    
+            const result3_1 = await jsonlFile.select({ name: nameValueToFilter }, {
+                filterType: 'base',
+                inTransaction: false,
+            })
+            expect(result3_1.sort(sortFn)).toEqual(
+                testData.filter((data) => data.name === nameValueToFilter).sort(sortFn),
+            )
         })
     })
 
@@ -1149,7 +1178,7 @@ describe('JSONLFile', () => {
             }, transactionOptions)
         })
 
-        it.only('04T.should support deletion in a transaction', async () => {
+        it('04T.should support deletion in a transaction', async () => {
             const testFile = `${testFileMain}_04T.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -2634,7 +2663,7 @@ describe.skip('JSONLFile selectWithPagination', () => {
         await jsonlFile.write(testData)
     })
 
-    it.only('should return first page', async () => {
+    it('should return first page', async () => {
         const res = await jsonlFile.selectWithPagination({}, 1, 10)
         expect(res.data).toHaveLength(10)
         expect(res.page).toBe(1)
@@ -2642,7 +2671,7 @@ describe.skip('JSONLFile selectWithPagination', () => {
         expect(res.pages).toBe(3)
     })
 
-    it.only('should return last page', async () => {
+    it('should return last page', async () => {
         // init select for caching
         const initRes = await jsonlFile.selectWithPagination({}, 1, 10)
         expect(initRes.data).toHaveLength(10)
@@ -2660,7 +2689,7 @@ describe.skip('JSONLFile selectWithPagination', () => {
         expect(updatedRecord[0].name).toBe('Updated Name21')
     })
 
-    it.only('should return empty page if page number is too large', async () => {
+    it('should return empty page if page number is too large', async () => {
         const res = await jsonlFile.selectWithPagination({}, 5, 10)
         expect(res.data).toHaveLength(0)
         expect(res.page).toBe(5)
@@ -2668,7 +2697,7 @@ describe.skip('JSONLFile selectWithPagination', () => {
         expect(res.pages).toBe(3)
     })
 
-    it.only('should correctly filter by user', async () => {
+    it('should correctly filter by user', async () => {
         const res = await jsonlFile.selectWithPagination(
             { user: 'User1' },
             1,
@@ -2679,7 +2708,7 @@ describe.skip('JSONLFile selectWithPagination', () => {
         expect(res.total).toBe(all.length)
     })
 
-    it.only('should update cache after record deletion', async () => {
+    it('should update cache after record deletion', async () => {
         // Инициализируем кэш
         const initRes = await jsonlFile.selectWithPagination({}, 1, 10)
         expect(initRes.data).toHaveLength(10)
@@ -2694,7 +2723,7 @@ describe.skip('JSONLFile selectWithPagination', () => {
         expect(res.data.find((item) => item.id === 5)).toBeUndefined() // Удаленная запись отсутствует
     })
 
-    it.only('should respect cache limit', async () => {
+    it('should respect cache limit', async () => {
         // create new instance with small cache limit
         const limitedJsonlFile = new JSONLFile<TestData>(testFile, '', {
             allocSize: 256,
@@ -2718,7 +2747,7 @@ describe.skip('JSONLFile selectWithPagination', () => {
         expect(cache?.getCacheSize()).toBeLessThanOrEqual(15)
     })
 
-    it.only('should clear cache after TTL expiration', async () => {
+    it('should clear cache after TTL expiration', async () => {
         // create new instance with small TTL
         const shortTTLJsonlFile = new JSONLFile<TestData>(testFile, '', {
             allocSize: 256,
