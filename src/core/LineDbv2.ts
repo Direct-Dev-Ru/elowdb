@@ -14,7 +14,10 @@ import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 import { chain, CollectionChain } from 'lodash'
 
 import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'
-import { LineDbAdapterOptions } from '../common/interfaces/jsonl-file.js'
+import {
+    JSONLFileOptions,
+    LineDbAdapterOptions,
+} from '../common/interfaces/jsonl-file.js'
 import {
     CacheEntry,
     JoinOptions,
@@ -23,6 +26,14 @@ import {
     LineDbOptions,
 } from '../common/interfaces/lineDb.js'
 import { logTest } from '../common/utils/log.js'
+
+export {
+    CacheEntry,
+    JoinOptions,
+    LineDbAdapter,
+    lineDbInitOptions,
+    LineDbOptions,
+} from '../common/interfaces/lineDb.js'
 
 const globalLineDbMutex = new RWMutex()
 const logForTest =
@@ -56,8 +67,21 @@ class LastIdManager {
 
     async incrementLastId(filename: string): Promise<number> {
         return await this.mutex.withWriteLock(async () => {
-            const currentId = this.lastIds.get(filename) || 0
-            const newId = currentId + 1
+            // Получаем все ключи, которые начинаются с базового имени файла
+            const baseName = filename.split('_')[0]
+            const allKeys = Array.from(this.lastIds.keys()).filter(
+                (key) => key === filename || key.startsWith(`${baseName}_`),
+            )
+
+            // Находим максимальный ID среди всех партиций
+            let maxId = 0
+            for (const key of allKeys) {
+                const currentId = this.lastIds.get(key) || 0
+                maxId = Math.max(maxId, currentId)
+            }
+
+            // Увеличиваем максимальный ID на 1
+            const newId = maxId + 1
             this.lastIds.set(filename, newId)
             return newId
         })
@@ -66,8 +90,9 @@ class LastIdManager {
 
 export class LineDb {
     #adapters: Map<string, unknown> = new Map()
-    // #adapters: Map<string, JSONLFile<unknown>> = new Map()
     #collections: Map<string, string> = new Map()
+    #partitionFunctions: Map<string, (item: Partial<unknown>) => string> =
+        new Map()
     #mutex: RWMutex
     #cache: Map<string, CacheEntry<unknown>>
     #cacheSize: number
@@ -82,20 +107,25 @@ export class LineDb {
 
     constructor(adapters?: unknown, options: LineDbOptions = {}) {
         this.#constructorOptions = options
-        if (Array.isArray(adapters)) {
-            for (const adapter of adapters) {
-                if (adapter instanceof JSONLFile) {
-                    const collectionName = adapter.getCollectionName()
-                    this.#adapters.set(collectionName, adapter)
-                    this.#collections.set(collectionName, adapter.getFilename())
+        if (adapters) {
+            if (Array.isArray(adapters)) {
+                for (const adapter of adapters) {
+                    if (adapter instanceof JSONLFile) {
+                        const collectionName = adapter.getCollectionName()
+                        this.#adapters.set(collectionName, adapter)
+                        this.#collections.set(
+                            collectionName,
+                            adapter.getFilename(),
+                        )
+                    }
                 }
+            } else if (adapters instanceof JSONLFile) {
+                const collectionName = adapters.getCollectionName()
+                this.#adapters.set(collectionName, adapters)
+                this.#collections.set(collectionName, adapters.getFilename())
+            } else {
+                throw new Error('Invalid adapters')
             }
-        } else if (adapters instanceof JSONLFile) {
-            const collectionName = adapters.getCollectionName()
-            this.#adapters.set(collectionName, adapters)
-            this.#collections.set(collectionName, adapters.getFilename())
-        } else {
-            throw new Error('Invalid adapters')
         }
 
         this.#mutex = options.mutex || globalLineDbMutex
@@ -106,42 +136,147 @@ export class LineDb {
         this.#lastIdManager = LastIdManager.getInstance()
     }
 
+    async #getPartitionFiles(collectionName: string): Promise<string[]> {
+        const adapter = this.#adapters.get(collectionName)
+        const dbFolder = path.dirname(
+            (adapter as JSONLFile<LineDbAdapter>).getFilename().toString(),
+        )
+        const files = await fs.readdir(dbFolder)
+        const partitionFiles = files.filter(
+            (file) =>
+                file.startsWith(`${collectionName}`) && file.endsWith('.jsonl'),
+        )
+        return partitionFiles
+    }
+
     async init(
         force: boolean = false,
         initOptions?: lineDbInitOptions,
     ): Promise<void> {
+        const dbFolder =
+            initOptions?.dbFolder ?? path.join(process.cwd(), 'linedb')
+
+        if (!fsClassic.existsSync(dbFolder)) {
+            await fs.mkdir(dbFolder, { recursive: true })
+        }
+
+        // Сохраняем функции партиционирования
+        if (initOptions?.partitions) {
+            for (const partition of initOptions.partitions) {
+                this.#partitionFunctions.set(
+                    partition.collectionName,
+                    partition.partIdFn,
+                )
+            }
+        }
+
         if (initOptions) {
             let i = 0
+
             for (const adapterOptions of initOptions.collections) {
                 i++
                 const resultCollectionName =
                     adapterOptions?.collectionName || `collection_${i}`
-                const newAdapter = new JSONLFile(
-                    path.join(
-                        initOptions?.dbFolder || '',
-                        `${resultCollectionName}.jsonl`,
-                    ),
-                    adapterOptions?.encryptKeyForLineDb || '',
-                    adapterOptions,
+
+                // Создаем адаптер для коллекции
+                const adapterfilePath = path.join(
+                    dbFolder || '',
+                    `${resultCollectionName}.jsonl`,
                 )
-                const collectionName = newAdapter.getCollectionName()
-                this.#adapters.set(collectionName, newAdapter)
-                this.#collections.set(collectionName, newAdapter.getFilename())
+
+                let exists = false
+                for (const [key, existingAdapter] of this.#adapters) {
+                    if (
+                        (
+                            existingAdapter as JSONLFile<LineDbAdapter>
+                        ).getFilename() === adapterfilePath
+                    ) {
+                        exists = true
+                        logTest(true, key, ' passed through ...')
+                        break
+                    }
+                }
+
+                if (!exists) {
+                    const newAdapter = new JSONLFile(
+                        adapterfilePath,
+                        adapterOptions?.encryptKeyForLineDb || '',
+                        adapterOptions,
+                    )
+                    await newAdapter.init(true)
+                    const collectionName = newAdapter.getCollectionName()
+                    this.#adapters.set(collectionName, newAdapter)
+                    this.#collections.set(
+                        collectionName,
+                        newAdapter.getFilename(),
+                    )
+                }
             }
         }
+
+        // Инициализация адаптеров и lastId
         for (const [collectionName, adapter] of this.#adapters) {
-            await (adapter as JSONLFile<LineDbAdapter>).init(force)
-            // Инициализируем lastId
-            const all = await this.read(collectionName)
-            if (all.length > 0) {
-                const maxId = Math.max(
-                    ...all.map((item) =>
-                        typeof item.id === 'number' ? item.id : 0,
-                    ),
-                )
+            if (this.#partitionFunctions.get(collectionName)) {
+                // there are can be partitions - need read all of them if exists
+
+                const partitionFiles =
+                    await this.#getPartitionFiles(collectionName)
+
+                let maxId = 0
+                for (const partitionFile of partitionFiles) {
+                    const partitionKey = partitionFile.replace('.jsonl', '')
+                    const partitionPath = path.join(dbFolder, partitionFile)
+
+                    // Создаем адаптер для партиции если его еще нет
+                    if (!this.#adapters.has(partitionKey)) {
+                        const partitionAdapter = new JSONLFile(
+                            partitionPath,
+                            (
+                                adapter as JSONLFile<LineDbAdapter>
+                            ).getEncryptKey() || '',
+                            {
+                                ...(
+                                    adapter as JSONLFile<LineDbAdapter>
+                                ).getOptions(),
+                                collectionName: partitionKey,
+                            },
+                        )
+                        this.#adapters.set(partitionKey, partitionAdapter)
+                        this.#collections.set(partitionKey, partitionPath)
+                    }
+
+                    // Инициализируем адаптер партиции
+                    const partitionAdapter = this.#adapters.get(
+                        partitionKey,
+                    ) as JSONLFile<LineDbAdapter>
+                    await partitionAdapter.init(force)
+
+                    // Читаем данные партиции и находим максимальный ID
+                    const partitionData = await partitionAdapter.read()
+                    const partitionMaxId = Math.max(
+                        ...partitionData.map((item) =>
+                            typeof item.id === 'number' ? item.id : 0,
+                        ),
+                        0,
+                    )
+                    maxId = Math.max(maxId, partitionMaxId)
+                }
+
+                // Устанавливаем максимальный ID для коллекции
                 await this.#lastIdManager.setLastId(collectionName, maxId)
             } else {
-                await this.#lastIdManager.setLastId(collectionName, 0)
+                await (adapter as JSONLFile<LineDbAdapter>).init(force)
+                const all = await this.read(collectionName)
+                if (all.length > 0) {
+                    const maxId = Math.max(
+                        ...all.map((item) =>
+                            typeof item.id === 'number' ? item.id : 0,
+                        ),
+                    )
+                    await this.#lastIdManager.setLastId(collectionName, maxId)
+                } else {
+                    await this.#lastIdManager.setLastId(collectionName, 0)
+                }
             }
         }
     }
@@ -178,6 +313,8 @@ export class LineDb {
         if (!collectionName) {
             collectionName = this.firstCollection
         }
+
+        // Если нет партиционирования, используем стандартный подход
         return await this.#nextIdFn(data || {}, collectionName)
     }
 
@@ -244,138 +381,164 @@ export class LineDb {
         if (!collectionName) {
             collectionName = this.firstCollection
         }
-        const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
-        if (!adapter) {
-            throw new Error(`Collection ${collectionName} not found`)
-        }
 
-        const payload = async () => {
-            const now = Date.now()
+        const partitionFn = this.#partitionFunctions.get(collectionName)
+        if (!partitionFn) {
+            // Если нет функции партиционирования, используем стандартное чтение
+            const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
+            if (!adapter) {
+                throw new Error(`Collection ${collectionName} not found`)
+            }
 
-            // Сначала проверяем кэш по id представленной записи
-            if (data.id) {
-                const cacheKey = `${collectionName}:${data.id}`
-                if (this.#cache.has(cacheKey)) {
-                    const entry = this.#cache.get(cacheKey) as CacheEntry<T>
+            const payload = async () => {
+                const now = Date.now()
 
-                    // Проверяем, не устарела ли запись в кэше
-                    if (
-                        this.#cacheTTL &&
-                        now - entry.lastAccess > this.#cacheTTL
-                    ) {
-                        // Запись устарела, удаляем её из кэша
-                        this.#cache.delete(cacheKey)
-                        logTest(
-                            logForTest,
-                            `Cache entry expired for ${cacheKey}`,
-                        )
-                    } else {
-                        // Запись актуальна, обновляем время доступа и возвращаем
-                        entry.lastAccess = now
-                        logTest(logForTest, `Cache hit for ${cacheKey}`)
-                        return [entry.data]
+                // Сначала проверяем кэш по id представленной записи
+                if (data.id) {
+                    const cacheKey = `${collectionName}:${data.id}`
+                    if (this.#cache.has(cacheKey)) {
+                        const entry = this.#cache.get(cacheKey) as CacheEntry<T>
+
+                        // Проверяем, не устарела ли запись в кэше
+                        if (
+                            this.#cacheTTL &&
+                            now - entry.lastAccess > this.#cacheTTL
+                        ) {
+                            // Запись устарела, удаляем её из кэша
+                            this.#cache.delete(cacheKey)
+                            logTest(
+                                logForTest,
+                                `Cache entry expired for ${cacheKey}`,
+                            )
+                        } else {
+                            // Запись актуальна, обновляем время доступа и возвращаем
+                            entry.lastAccess = now
+                            logTest(logForTest, `Cache hit for ${cacheKey}`)
+                            return [entry.data]
+                        }
                     }
                 }
+
+                const results = await adapter.readByFilter(data, {
+                    ...options,
+                    inTransaction:
+                        this.#inTransaction || options?.inTransaction || false,
+                })
+
+                // Обновляем кэш
+                for (const item of results) {
+                    this.#updateCache(item, collectionName as string)
+                }
+
+                return results
             }
 
-            const results = await adapter.readByFilter(data, {
-                ...options,
-                inTransaction:
-                    this.#inTransaction || options?.inTransaction || false,
-            })
-
-            // Обновляем кэшшшшшшшшшшшшшшшшшшшшшшшшшшшшшшшшшшш
-            for (const item of results) {
-                this.#updateCache(item, collectionName as string)
+            if (this.#inTransaction || options?.inTransaction) {
+                return await payload()
             }
-
-            return results
+            return await this.#mutex.withReadLock(payload)
         }
 
-        if (this.#inTransaction || options?.inTransaction) {
-            return await payload()
+        // Если есть функция партиционирования, читаем из всех партиций
+        const results: T[] = []
+        for (const [key, partitionAdapter] of this.#adapters) {
+            if (key.startsWith(`${collectionName}_`)) {
+                const partitionResults = await (
+                    partitionAdapter as JSONLFile<T>
+                ).readByFilter(data, {
+                    strictCompare: options?.strictCompare || false,
+                    inTransaction:
+                        this.#inTransaction || options?.inTransaction || false,
+                })
+                results.push(...partitionResults)
+            }
         }
-        return await this.#mutex.withReadLock(payload)
+
+        return results
     }
 
     async write<T extends LineDbAdapter>(
-        data: T | T[],
+        data: T | T[] | Partial<T> | Partial<T>[],
         collectionName?: string,
         options: { inTransaction: boolean } = { inTransaction: false },
     ): Promise<void> {
         if (!collectionName) {
             collectionName = this.firstCollection
         }
-        const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
-        if (!adapter) {
-            throw new Error(`Collection ${collectionName} not found`)
+
+        const dataArray = Array.isArray(data) ? data : [data]
+        const adapters = new Map<string, T[]>()
+
+        // Группируем данные по партициям
+        for (const item of dataArray) {
+            const adapter = await this.getPartitionAdapter<T>(
+                item as T,
+                collectionName,
+            )
+            const adapterKey = adapter.getCollectionName()
+
+            if (!adapters.has(adapterKey)) {
+                adapters.set(adapterKey, [])
+            }
+            adapters.get(adapterKey)!.push(item as T)
         }
 
-        const payload = async () => {
-            const dataArray = Array.isArray(data) ? data : [data]
-            for (const item of dataArray) {
-                // Генерируем id для новых записей
-                if (!item.id || Number(item.id) <= -1) {
-                    item.id = await this.nextId(item, collectionName)
-                }
+        // Записываем данные в соответствующие партиции
+        for (const [adapterKey, items] of adapters) {
+            const adapter = this.#adapters.get(adapterKey) as JSONLFile<T>
+            if (!adapter) {
+                throw new Error(`Adapter ${adapterKey} not found`)
             }
 
-            await adapter.write(dataArray, {
+            await adapter.write(items, {
                 inTransaction: this.#inTransaction || options.inTransaction,
             })
+
             // Обновляем кэш
-            for (const item of dataArray) {
-                this.#updateCache(item, collectionName as string)
+            for (const item of items) {
+                this.#updateCache(item, adapterKey)
             }
         }
-        if (this.#inTransaction || options.inTransaction) {
-            return await payload()
-        }
-        return await this.#mutex.withWriteLock(payload)
     }
 
     async insert<T extends LineDbAdapter>(
-        data: T | T[],
+        data: T | T[] | Partial<T> | Partial<T>[],
         collectionName?: string,
         options: { inTransaction: boolean } = { inTransaction: false },
     ): Promise<void> {
         if (!collectionName) {
             collectionName = this.firstCollection
         }
-        const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
-        if (!adapter) {
-            throw new Error(`Collection ${collectionName} not found`)
-        }
 
         const payload = async () => {
             const dataArray = Array.isArray(data) ? data : [data]
+            const resultDataArray = []
             for (const item of dataArray) {
-                // Generate id for new records
+                // Generate id for new records if omit
                 if (!item.id || Number(item.id) <= -1) {
-                    item.id = await this.nextId(item, collectionName)
+                    const newId = await this.nextId(item, collectionName)
+                    resultDataArray.push({ id: newId, ...item })
                 } else {
                     // Check if record does not exist
                     const filter = { id: item.id } as Partial<T>
-                    const exists = await adapter.readByFilter(filter, {
-                        strictCompare: true,
-                        inTransaction:
-                            this.#inTransaction || options.inTransaction,
-                    })
-                    if (exists.length > 0) {
-                        throw new Error(
-                            `Record with id ${item.id} already exists in collection ${collectionName}`,
-                        )
+
+                    for (const [key, partitionAdapter] of this.#adapters) {
+                        if (key.includes(collectionName)) {
+                            const exists = await (
+                                partitionAdapter as JSONLFile<LineDbAdapter>
+                            ).readByFilter(filter, { inTransaction: true })
+                            if (exists.length > 0) {
+                                throw new Error(
+                                    `Record with id ${item.id} already exists in collection ${collectionName}`,
+                                )
+                            }
+                        }
                     }
+                    resultDataArray.push({ ...item })
                 }
             }
 
-            await adapter.write(dataArray, {
-                inTransaction: this.#inTransaction || options.inTransaction,
-            })
-            // Обновляем кэш
-            for (const item of dataArray) {
-                this.#updateCache(item, collectionName as string)
-            }
+            await this.write(resultDataArray, collectionName, options)
         }
         if (this.#inTransaction || options.inTransaction) {
             return await payload()
@@ -1136,6 +1299,60 @@ export class LineDb {
                 }`,
             }
         }
+    }
+
+    async getPartitionAdapter<T extends LineDbAdapter>(
+        data: T,
+        collectionName?: string,
+    ): Promise<JSONLFile<T>> {
+        if (!collectionName) {
+            collectionName = this.firstCollection
+        }
+
+        const partitionFn = this.#partitionFunctions.get(collectionName)
+        if (!partitionFn) {
+            // Если нет функции партиционирования, используем дефолтный адаптер
+            const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
+            if (!adapter) {
+                throw new Error(`Collection ${collectionName} not found`)
+            }
+            return adapter
+        }
+
+        const partitionValue = partitionFn(data) || '_default'
+        const partitionKey = `${collectionName}_${partitionValue}`
+
+        let partitionAdapter = this.#adapters.get(partitionKey) as JSONLFile<T>
+        if (!partitionAdapter) {
+            // Создаем новый адаптер для партиции
+            const baseAdapter = this.#adapters.get(
+                collectionName,
+            ) as JSONLFile<T>
+            if (!baseAdapter) {
+                throw new Error(`Collection ${collectionName} not found`)
+            }
+
+            const dbFolder = path.dirname(baseAdapter.getFilename().toString())
+            const partitionFilename = path.join(
+                dbFolder,
+                `${collectionName}_${partitionValue}.jsonl`,
+            )
+
+            partitionAdapter = new JSONLFile(
+                partitionFilename,
+                baseAdapter.getEncryptKey() || '',
+                {
+                    ...baseAdapter.getOptions(),
+                    collectionName: partitionKey,
+                },
+            )
+
+            await partitionAdapter.init(true)
+            this.#adapters.set(partitionKey, partitionAdapter)
+            this.#collections.set(partitionKey, partitionFilename)
+        }
+
+        return partitionAdapter
     }
 }
 

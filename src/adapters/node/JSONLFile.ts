@@ -2667,6 +2667,14 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             options,
         })
     }
+
+    getOptions(): JSONLFileOptions<T> {
+        return this.#constructorOptions
+    }
+
+    getEncryptKey(): string {
+        return this.#cypherKey
+    }
 }
 
 function isPartialT<T>(
