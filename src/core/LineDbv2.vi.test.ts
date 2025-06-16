@@ -60,10 +60,17 @@ describe('LineDb', () => {
         }
     })
 
+
+
+
     describe.skip('Инициализация', () => {
         it('должен успешно инициализироваться с несколькими коллекциями', async () => {
             expect(db).toBeDefined()
             await expect(db.init()).resolves.not.toThrow()
+        })
+
+        it('should do something', () => {
+            logTest(true, "we do something ...")
         })
 
         it('должен создавать файлы при инициализации', async () => {

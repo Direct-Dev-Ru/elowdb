@@ -44,7 +44,7 @@ class LastIdManager {
     private lastIds: Map<string, number> = new Map()
     private mutex: RWMutex = new RWMutex()
 
-    private constructor() {}
+    private constructor() { }
 
     static getInstance(): LastIdManager {
         if (!LastIdManager.instance) {
@@ -54,35 +54,50 @@ class LastIdManager {
     }
 
     async getLastId(filename: string): Promise<number> {
+        const idsMap = this.lastIds
         return await this.mutex.withReadLock(async () => {
-            return this.lastIds.get(filename) || 0
+            const baseFileName = filename.split('_')[0]
+            return idsMap.get(baseFileName) || 0
         })
     }
 
     async setLastId(filename: string, id: number): Promise<void> {
+        const idsMap = this.lastIds
         await this.mutex.withWriteLock(async () => {
-            this.lastIds.set(filename, id)
+            // idsMap.set(filename, id)
+            // change in base map key
+            if (filename.includes("_")) {
+                const baseFileName = filename.split('_')[0]
+                const currenBaseFileNameId = idsMap.get(baseFileName) || 0
+                if (currenBaseFileNameId < id) {
+                    idsMap.set(baseFileName, id)
+                }
+            } else {
+                idsMap.set(filename, id)
+            }
         })
     }
 
     async incrementLastId(filename: string): Promise<number> {
+        const idsMap = this.lastIds
         return await this.mutex.withWriteLock(async () => {
-            // Получаем все ключи, которые начинаются с базового имени файла
-            const baseName = filename.split('_')[0]
-            const allKeys = Array.from(this.lastIds.keys()).filter(
-                (key) => key === filename || key.startsWith(`${baseName}_`),
-            )
+
+            const baseFileName = filename.split('_')[0]
+            // const allKeys = Array.from(idsMap.keys()).filter(
+            //     (key) => key === filename || key.startsWith(`${baseName}_`),
+            // )
 
             // Находим максимальный ID среди всех партиций
-            let maxId = 0
-            for (const key of allKeys) {
-                const currentId = this.lastIds.get(key) || 0
-                maxId = Math.max(maxId, currentId)
-            }
+            // let maxId = 0
+            // for (const key of allKeys) {
+            //     const currentId = this.lastIds.get(key) || 0
+            //     maxId = Math.max(maxId, currentId)
+            // }
 
             // Увеличиваем максимальный ID на 1
-            const newId = maxId + 1
-            this.lastIds.set(filename, newId)
+            const currentBaseFileNameId = idsMap.get(baseFileName) || 0
+            const newId = currentBaseFileNameId + 1
+            idsMap.set(baseFileName, newId)
             return newId
         })
     }
@@ -374,7 +389,7 @@ export class LineDb {
     }
 
     async readByFilter<T extends LineDbAdapter>(
-        data: Partial<T>,
+        data: Partial<T> | string,
         collectionName?: string,
         options?: { strictCompare?: boolean; inTransaction?: boolean },
     ): Promise<T[]> {
@@ -394,7 +409,7 @@ export class LineDb {
                 const now = Date.now()
 
                 // Сначала проверяем кэш по id представленной записи
-                if (data.id) {
+                if (typeof data === "object" && data.id) {
                     const cacheKey = `${collectionName}:${data.id}`
                     if (this.#cache.has(cacheKey)) {
                         const entry = this.#cache.get(cacheKey) as CacheEntry<T>
@@ -494,9 +509,16 @@ export class LineDb {
                 inTransaction: this.#inTransaction || options.inTransaction,
             })
 
-            // Обновляем кэш
+            // Set LastId if it has number type and using default function            
+            // Refresh cache
             for (const item of items) {
                 this.#updateCache(item, adapterKey)
+                if (!this.#constructorOptions.nextIdFn && typeof item.id === "number") {
+                    const currentId = await this.#lastIdManager.getLastId(adapterKey)
+                    if (item.id > currentId || 0) {
+                        this.#lastIdManager.setLastId(adapterKey, item.id)
+                    }
+                }
             }
         }
     }
@@ -512,11 +534,23 @@ export class LineDb {
 
         const payload = async () => {
             const dataArray = Array.isArray(data) ? data : [data]
-            const resultDataArray = []
+            const resultDataArray: Partial<T>[] = []
             for (const item of dataArray) {
                 // Generate id for new records if omit
                 if (!item.id || Number(item.id) <= -1) {
-                    const newId = await this.nextId(item, collectionName)
+                    let done = false
+                    let newId: string | number = -1
+                    let count = 0
+                    while (!done) {
+                        newId = await this.nextId(item, collectionName)
+                        if (!resultDataArray.some((item) => item.id === newId)) {
+                            done = true
+                        }
+                        count++
+                        if (count > 10_000) {
+                            throw new Error("Can not generate new id for 10 000 iterations");
+                        }
+                    }
                     resultDataArray.push({ id: newId, ...item })
                 } else {
                     // Check if record does not exist
@@ -661,6 +695,9 @@ export class LineDb {
         collectionName: string,
         // options: { inTransaction: boolean } = { inTransaction: false },
     ): void {
+        if (this.#cacheTTL && this.#cacheTTL <= 0) {
+            return
+        }
         const now = Date.now()
         const cacheKey = `${collectionName}:${item.id}`
 
@@ -849,59 +886,59 @@ export class LineDb {
             leftData =
                 typeof leftCollection === 'string'
                     ? await this.readByFilter<T>(
-                          options.leftFilter,
-                          typeof leftCollection === 'string'
-                              ? leftCollection
-                              : undefined,
-                          {
-                              strictCompare: options.strictCompare,
-                              inTransaction: options.inTransaction,
-                          },
-                      )
+                        options.leftFilter,
+                        typeof leftCollection === 'string'
+                            ? leftCollection
+                            : undefined,
+                        {
+                            strictCompare: options.strictCompare,
+                            inTransaction: options.inTransaction,
+                        },
+                    )
                     : await this.#filterByData<T>(
-                          options.leftFilter,
-                          leftCollection,
-                          {
-                              strictCompare: options.strictCompare,
-                          },
-                      )
+                        options.leftFilter,
+                        leftCollection,
+                        {
+                            strictCompare: options.strictCompare,
+                        },
+                    )
         }
         if (options.rightFilter) {
             rightData =
                 typeof rightCollection === 'string'
                     ? await this.readByFilter<U>(
-                          options.rightFilter,
-                          typeof rightCollection === 'string'
-                              ? rightCollection
-                              : undefined,
-                          {
-                              strictCompare: options.strictCompare,
-                              inTransaction: options.inTransaction,
-                          },
-                      )
+                        options.rightFilter,
+                        typeof rightCollection === 'string'
+                            ? rightCollection
+                            : undefined,
+                        {
+                            strictCompare: options.strictCompare,
+                            inTransaction: options.inTransaction,
+                        },
+                    )
                     : await this.#filterByData<U>(
-                          options.rightFilter,
-                          rightCollection,
-                          {
-                              strictCompare: options.strictCompare,
-                          },
-                      )
+                        options.rightFilter,
+                        rightCollection,
+                        {
+                            strictCompare: options.strictCompare,
+                        },
+                    )
         }
 
         if (leftData.length === 0) {
             leftData = Array.isArray(leftCollection)
                 ? leftCollection
                 : await this.read<T>(leftCollection, {
-                      inTransaction: options.inTransaction as boolean,
-                  })
+                    inTransaction: options.inTransaction as boolean,
+                })
         }
 
         if (rightData.length === 0) {
             rightData = Array.isArray(rightCollection)
                 ? rightCollection
                 : await this.read<U>(rightCollection, {
-                      inTransaction: options.inTransaction as boolean,
-                  })
+                    inTransaction: options.inTransaction as boolean,
+                })
         }
 
         const result: { left: T; right: U | null }[] = []
@@ -1294,9 +1331,8 @@ export class LineDb {
         } catch (error) {
             // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
             return {
-                error: `Error restoring from backup: ${
-                    (error as Error).message
-                }`,
+                error: `Error restoring from backup: ${(error as Error).message
+                    }`,
             }
         }
     }

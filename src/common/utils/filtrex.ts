@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable no-control-regex */
 import { compileExpression } from 'filtrex'
-
+import filtrexFunctions from './filtrexFunctions'
 // Тип для конфигурации фильтра
 interface FilterConfig<T> {
     allowedFields?: Array<keyof T>
@@ -52,7 +52,9 @@ export function createSafeFilter<T>(
         const normalizedExpression = normalizeExpression(expression)
 
         // Компилируем выражение без дополнительных опций
-        const filter = compileExpression(normalizedExpression)
+        const filter = compileExpression(normalizedExpression, {
+            extraFunctions: filtrexFunctions,
+        })
 
         // Создаем обертку для проверки разрешенных полей и операторов
         return (data: T) => {

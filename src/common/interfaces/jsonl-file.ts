@@ -42,6 +42,7 @@ export interface JSONLFileOptions<T extends { id: string | number }> {
 
 export interface LineDbAdapter {
     id: string | number
+    timestamp?: number // timestamp in milliseconds
 }
 
 export interface LineDbAdapterOptions {
