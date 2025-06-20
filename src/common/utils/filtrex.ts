@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable no-control-regex */
 import { compileExpression } from 'filtrex'
+
 import filtrexFunctions from './filtrexFunctions'
 // Тип для конфигурации фильтра
 interface FilterConfig<T> {
@@ -21,6 +23,8 @@ interface FilterConfig<T> {
     >
     allowFunctions?: boolean
     allowGlobals?: boolean
+    skipValidation?: boolean
+    extraFunctions?: Record<string, (...args: unknown[]) => unknown>
 }
 
 /**
@@ -38,6 +42,636 @@ function normalizeExpression(expression: string): string {
 }
 
 /**
+ * Декодирует base64 строку
+ * @param str Строка для декодирования
+ * @returns Декодированная строка или null если ошибка
+ */
+function decodeBase64(str: string): string | null {
+    try {
+        // Убираем возможные префиксы
+        const cleanStr = str.replace(/^data:text\/javascript;base64,/, '')
+        return atob(cleanStr)
+    } catch {
+        return null
+    }
+}
+
+/**
+ * Проверяет строку на наличие base64-кодированного JavaScript кода
+ * @param str Строка для проверки
+ * @returns true если обнаружен base64 JavaScript код
+ */
+function containsBase64JavaScript(
+    str: string,
+    safeFuncs: string[] = safeFunctions,
+): boolean {
+    // Паттерны для base64 JavaScript кода
+    const base64Patterns = [
+        // data:text/javascript;base64,
+        /data:text\/javascript;base64,[A-Za-z0-9+/=]+/gi,
+        // Просто base64 строки (проверяем на наличие JavaScript ключевых слов после декодирования)
+        /[A-Za-z0-9+/]{10,}={0,2}/g, // base64 строки длиной 20+ символов
+    ]
+
+    for (const pattern of base64Patterns) {
+        const matches = str.match(pattern)
+        if (matches) {
+            for (const match of matches) {
+                const decoded = decodeBase64(match)
+                if (decoded && containsJavaScriptCode(decoded, safeFuncs)) {
+                    return true
+                }
+            }
+        }
+    }
+
+    return false
+}
+
+/**
+ * Список безопасных функций из filtrexFunctions
+ */
+const safeFunctions = [
+    // Строковые функции
+    'strLen',
+    'strCmp',
+    'strConcat',
+    'strSplit',
+    'strJoin',
+    'strReplace',
+    'strToLower',
+    'strToUpper',
+    'strTrim',
+    'strPad',
+    'strPadRight',
+    'strRepeat',
+    'strSlice',
+    'strSubstring',
+
+    // Функции для работы с датами
+    'getFullYear',
+    'getMonth',
+    'getDay',
+    'getHours',
+    'getMinutes',
+    'getSeconds',
+    'getMilliseconds',
+    'getTime',
+    'formatDate',
+
+    // Функции для проверки типов
+    'isNumber',
+    'isInteger',
+    'isString',
+    'isBoolean',
+    'isArray',
+    'isObject',
+    'isNull',
+    'isUndefined',
+
+    // Математические функции
+    'round',
+    'abs',
+    'min',
+    'max',
+    'inRange',
+
+    // Функции для работы с массивами
+    'arrLen',
+    'arrIncludes',
+    'arrIndexOf',
+    'arrFirst',
+    'arrLast',
+    'arrConcat',
+    'arrFilter',
+    'arrMap',
+    'arrSome',
+    'arrEvery',
+    'arrFind',
+    'arrFindIndex',
+    'arrSort',
+    'arrReverse',
+    'arrSlice',
+    'arrUnique',
+    'arrJoin',
+
+    // Функции для работы с Map
+    'mapFromEntries',
+    'mapGet',
+    'mapHas',
+    'mapKeys',
+    'mapValues',
+    'mapEntries',
+    'mapSize',
+
+    // Функции для работы с Set
+    'setFromValues',
+    'setHas',
+    'setValues',
+    'setSize',
+    'setUnion',
+    'setIntersection',
+    'setDifference',
+]
+
+/**
+ * Проверяет строку на наличие JavaScript кода
+ * @param str Строка для проверки
+ * @returns true если обнаружен JavaScript код
+ */
+function containsJavaScriptCode(
+    str: string,
+    safeFuncs: string[] = safeFunctions,
+): boolean {
+    const jsPatterns = [
+        // Исключаем ключевые слова JavaScript, которые могут выглядеть как функции
+        /\b(function|var|let|const|if|else|for|while|do|switch|case|break|continue|return|throw|try|catch|finally|class|extends|super|new|delete|typeof|instanceof|void|in|of|with|debugger|export|import|default|async|await|yield|get|set|static|public|private|protected|interface|implements|enum|namespace|module|require|exports|global|window|document|console|alert|confirm|prompt|eval|Function|setTimeout|setInterval|setImmediate|clearTimeout|clearInterval|clearImmediate|requestAnimationFrame|cancelAnimationFrame|fetch|XMLHttpRequest|WebSocket|localStorage|sessionStorage|indexedDB|process|Buffer|__dirname|__filename)\b/gi,
+
+        // Функции и вызовы (исключая безопасные функции)
+        /\b\w+\s*\(/g,
+        /\bnew\s+\w+/g,
+
+        // Операторы
+        // /(===|==|!==|!=|<=|>=|<|>|\+\+|--|\+=|-=|\*=|\/=|%=|\*\*=|&=|\|=|\^=|<<=|>>=|>>>=|\+|-|\*|\/|%|\*\*|&|\||\^|~|<<|>>|>>>)/g,
+
+        // Структуры данных
+        /\[[^\]]*\]/g,
+        /\{[^}]*\}/g,
+
+        // Строковые литералы с потенциальным кодом
+        /"[^"]*"/g,
+        /'[^']*'/g,
+        /`[^`]*`/g,
+
+        // Комментарии
+        /\/\/.*$/gm,
+        /\/\*[\s\S]*?\*\//g,
+
+        // Регулярные выражения
+        /\/[^/]+\/[gimuy]*/g,
+
+        // Точка с запятой и фигурные скобки
+        /[;{}]/g,
+    ]
+
+    // Проверяем каждый паттерн
+    for (const pattern of jsPatterns) {
+        const matches = str.match(pattern)
+        if (matches) {
+            for (const match of matches) {
+                // Проверяем, не является ли это безопасной функцией
+                const isSafeFunction = safeFuncs.some((safeFunc) =>
+                    match.toLowerCase().includes(safeFunc.toLowerCase()),
+                )
+
+                if (!isSafeFunction) {
+                    return true
+                }
+            }
+        }
+    }
+
+    return false
+}
+
+/**
+ * Проверяет выражение на наличие вредоносных конструкций
+ * @param expression Выражение для проверки
+ * @throws Error если обнаружены вредоносные конструкции
+ */
+function validateExpressionSecurity(
+    expression: string,
+    safeFuncs: string[] = safeFunctions,
+): void {
+    // Проверяем на base64 JavaScript код
+    if (containsBase64JavaScript(expression, safeFuncs)) {
+        throw new Error(
+            'Security violation: base64-encoded JavaScript code detected',
+        )
+    }
+
+    // Проверяем на URL-encoded JavaScript код
+    if (containsUrlEncodedJavaScript(expression, safeFuncs)) {
+        throw new Error(
+            'Security violation: URL-encoded JavaScript code detected',
+        )
+    }
+
+    // Проверяем на hex-encoded JavaScript код
+    if (containsHexEncodedJavaScript(expression, safeFuncs)) {
+        throw new Error(
+            'Security violation: hex-encoded JavaScript code detected',
+        )
+    }
+
+    // Проверяем на Unicode-encoded JavaScript код
+    if (containsUnicodeEncodedJavaScript(expression, safeFuncs)) {
+        throw new Error(
+            'Security violation: Unicode-encoded JavaScript code detected',
+        )
+    }
+
+    // List of forbidden patterns
+    const maliciousPatterns = [
+        // eval и Function
+        /\beval\s*\(/gi,
+        /\bFunction\s*\(/gi,
+        /\bnew\s+Function\s*\(/gi,
+
+        // Global objects
+        /\bglobal\b/gi,
+        /\bwindow\b/gi,
+        /\bdocument\b/gi,
+        /\bprocess\b/gi,
+        /\bconsole\b/gi,
+
+        // Modules and imports
+        /\brequire\s*\(/gi,
+        /\bimport\s*\(/gi,
+        /\bmodule\b/gi,
+        /\bexports\b/gi,
+
+        // Prototypes and constructors
+        /\b__proto__\b/gi,
+        /\bconstructor\b/gi,
+        /\bprototype\b/gi,
+        /\bnew\s+(Object|Array|String|Number|Boolean|Date|RegExp)\s*\(/gi,
+
+        // Assignment operators
+        /\b=\s*[^=]/g, // simple assignment
+        /\b\+=/g,
+        /\b-=/g,
+        /\b\*=/g,
+        /\b\/=/g,
+        /\b%=/g,
+        /\b\*\*=/g,
+
+        // Semicolon (injection)
+        /;/g,
+
+        // Functions and calls (исключая безопасные функции)
+        /\b\(\)/g, // пустые вызовы
+        /\bnew\s+/gi,
+
+        // Control characters
+        /[\x00-\x1F\x7F-\x9F]/g,
+
+        // HTML and JavaScript
+        /<[^>]*>/g,
+        /\bjavascript:/gi,
+
+        // Debugging constructs
+        /\bdebugger\b/gi,
+        /\bwith\b/gi,
+
+        // Classes and async/await
+        /\bclass\b/gi,
+        /\basync\b/gi,
+        /\bawait\b/gi,
+        /\byield\b/gi,
+
+        // Other dangerous constructs
+        /\bthis\b/gi,
+        /\bsuper\b/gi,
+        /\barguments\b/gi,
+        /\bdelete\b/gi,
+        /\btypeof\b/gi,
+        /\binstanceof\b/gi,
+        /\bvoid\b/gi,
+        /\bin\b/gi,
+
+        // Template literals
+        /`[^`]*\$\{[^}]*\}[^`]*`/g,
+
+        // Arrays and objects with potentially dangerous content
+        // /\[[^\]]*\]/g,
+        // /\{[^}]*\}/g,
+
+        // Base64 patterns (дополнительные)
+        /[A-Za-z0-9+/]{50,}={0,2}/g, // длинные base64 строки
+        /data:[^;]+;base64,/gi, // data URLs с base64
+
+        // Дополнительные проверки для base64
+        /"[A-Za-z0-9+/]{20,}={0,2}"/g, // base64 строки в кавычках
+        /'[A-Za-z0-9+/]{20,}={0,2}'/g, // base64 строки в одинарных кавычках
+    ]
+
+    // Проверяем каждый паттерн
+    for (const pattern of maliciousPatterns) {
+        if (pattern.test(expression)) {
+            throw new Error(
+                `Security violation: forbidden pattern detected in expression`,
+            )
+        }
+    }
+
+    // Дополнительные проверки
+    const normalizedExpression = expression.toLowerCase()
+
+    // Проверяем на наличие опасных функций (исключая безопасные)
+    const dangerousFunctions = [
+        'alert',
+        'confirm',
+        'prompt',
+        'setTimeout',
+        'setInterval',
+        'setImmediate',
+        'clearTimeout',
+        'clearInterval',
+        'clearImmediate',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+        'fetch',
+        'XMLHttpRequest',
+        'WebSocket',
+        'localStorage',
+        'sessionStorage',
+        'indexedDB',
+        'crypto',
+        'performance',
+        'navigator',
+        'location',
+        'history',
+        'screen',
+        'atob',
+        'btoa',
+        'unescape',
+        'escape',
+        'decodeURI',
+        'decodeURIComponent',
+        'encodeURI',
+        'encodeURIComponent',
+    ]
+
+    for (const func of dangerousFunctions) {
+        if (normalizedExpression.includes(func)) {
+            throw new Error(
+                `Security violation: forbidden function '${func}' detected`,
+            )
+        }
+    }
+
+    // Проверяем на наличие опасных объектов
+    const dangerousObjects = [
+        'global',
+        'window',
+        'document',
+        'process',
+        'console',
+        'module',
+        'exports',
+        'require',
+        'import',
+        'arguments',
+        'this',
+        'super',
+        '__proto__',
+        'constructor',
+        'prototype',
+    ]
+
+    for (const obj of dangerousObjects) {
+        if (normalizedExpression.includes(obj)) {
+            throw new Error(
+                `Security violation: forbidden object '${obj}' detected`,
+            )
+        }
+    }
+
+    // Дополнительная проверка на base64 строки
+    const base64Matches = expression.match(/"[A-Za-z0-9+/]{20,}={0,2}"/g)
+    if (base64Matches) {
+        for (const match of base64Matches) {
+            const base64Str = match.slice(1, -1) // убираем кавычки
+            try {
+                const decoded = atob(base64Str)
+                if (containsJavaScriptCode(decoded, safeFuncs)) {
+                    throw new Error(
+                        'Security violation: base64-encoded JavaScript code detected',
+                    )
+                }
+            } catch {
+                // Игнорируем ошибки декодирования
+            }
+        }
+    }
+
+    // Проверка на одинарные кавычки
+    const base64MatchesSingle = expression.match(/'[A-Za-z0-9+/]{20,}={0,2}'/g)
+    if (base64MatchesSingle) {
+        for (const match of base64MatchesSingle) {
+            const base64Str = match.slice(1, -1) // убираем кавычки
+            try {
+                const decoded = atob(base64Str)
+                if (containsJavaScriptCode(decoded, safeFuncs)) {
+                    throw new Error(
+                        'Security violation: base64-encoded JavaScript code detected',
+                    )
+                }
+            } catch {
+                // Игнорируем ошибки декодирования
+            }
+        }
+    }
+}
+
+/**
+ * Проверяет строку на наличие URL-encoded JavaScript кода
+ * @param str Строка для проверки
+ * @returns true если обнаружен URL-encoded JavaScript код
+ */
+function containsUrlEncodedJavaScript(
+    str: string,
+    safeFuncs: string[] = safeFunctions,
+): boolean {
+    const urlEncodedPatterns = [
+        /%[0-9A-Fa-f]{2}/g, // URL-encoded символы
+    ]
+
+    for (const pattern of urlEncodedPatterns) {
+        const matches = str.match(pattern)
+        if (matches && matches.length > 5) {
+            // Если много URL-encoded символов
+            try {
+                const decoded = decodeURIComponent(str)
+                if (containsJavaScriptCode(decoded, safeFuncs)) {
+                    return true
+                }
+            } catch {
+                // Игнорируем ошибки декодирования
+            }
+        }
+    }
+
+    return false
+}
+
+/**
+ * Проверяет строку на наличие hex-encoded JavaScript кода
+ * @param str Строка для проверки
+ * @returns true если обнаружен hex-encoded JavaScript код
+ */
+function containsHexEncodedJavaScript(
+    str: string,
+    safeFuncs: string[] = safeFunctions,
+): boolean {
+    const hexPatterns = [
+        /\\x[0-9A-Fa-f]{2}/g, // hex escape sequences
+        /\\u[0-9A-Fa-f]{4}/g, // Unicode escape sequences
+    ]
+
+    for (const pattern of hexPatterns) {
+        const matches = str.match(pattern)
+        if (matches && matches.length > 3) {
+            // Если много hex-encoded символов
+            try {
+                const decoded = str
+                    .replace(/\\x([0-9A-Fa-f]{2})/g, (_, hex) =>
+                        String.fromCharCode(parseInt(hex, 16)),
+                    )
+                    .replace(/\\u([0-9A-Fa-f]{4})/g, (_, hex) =>
+                        String.fromCharCode(parseInt(hex, 16)),
+                    )
+                if (containsJavaScriptCode(decoded, safeFuncs)) {
+                    return true
+                }
+            } catch {
+                // Игнорируем ошибки декодирования
+            }
+        }
+    }
+
+    return false
+}
+
+/**
+ * Проверяет строку на наличие Unicode-encoded JavaScript кода
+ * @param str Строка для проверки
+ * @returns true если обнаружен Unicode-encoded JavaScript код
+ */
+function containsUnicodeEncodedJavaScript(
+    str: string,
+    safeFuncs: string[] = safeFunctions,
+): boolean {
+    const unicodePatterns = [
+        /\\u[0-9A-Fa-f]{4}/g, // Unicode escape sequences
+        /\\u\{[0-9A-Fa-f]+\}/g, // Unicode code point escape sequences
+    ]
+
+    for (const pattern of unicodePatterns) {
+        const matches = str.match(pattern)
+        if (matches && matches.length > 2) {
+            // Если много Unicode-encoded символов
+            try {
+                const decoded = str
+                    .replace(/\\u([0-9A-Fa-f]{4})/g, (_, hex) =>
+                        String.fromCharCode(parseInt(hex, 16)),
+                    )
+                    .replace(/\\u\{([0-9A-Fa-f]+)\}/g, (_, hex) =>
+                        String.fromCodePoint(parseInt(hex, 16)),
+                    )
+                if (containsJavaScriptCode(decoded, safeFuncs)) {
+                    return true
+                }
+            } catch {
+                // Игнорируем ошибки декодирования
+            }
+        }
+    }
+
+    return false
+}
+/**
+ * Извлекает имена функций из выражения
+ * @param expression Выражение для анализа
+ * @returns Массив имен функций
+ */
+function extractFunctionNames(expression: string): string[] {
+    // Паттерн для поиска вызовов функций: functionName(arguments)
+    const functionCallPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g
+    const functionNames: string[] = []
+    let match
+
+    while ((match = functionCallPattern.exec(expression)) !== null) {
+        const functionName = match[1]
+        // Exclude JavaScript keywords that might look like functions
+        const jsKeywords = [
+            'if',
+            'else',
+            'for',
+            'while',
+            'do',
+            'switch',
+            'case',
+            'break',
+            'continue',
+            'return',
+            'throw',
+            'try',
+            'catch',
+            'finally',
+            'class',
+            'extends',
+            'super',
+            'new',
+            'delete',
+            'typeof',
+            'instanceof',
+            'void',
+            'in',
+            'of',
+            'with',
+            'debugger',
+            'export',
+            'import',
+            'default',
+            'async',
+            'await',
+            'yield',
+            'get',
+            'set',
+            'static',
+            'public',
+            'private',
+            'protected',
+            'interface',
+            'implements',
+            'enum',
+            'namespace',
+            'module',
+            'require',
+            'exports',
+            'global',
+            'window',
+            'document',
+            'process',
+            'console',
+            'debugger',
+            'or',
+            'and',
+            'not',
+            'true',
+            'false',
+            'null',
+            'undefined',
+            'this',
+            'super',
+            'prototype',
+            'constructor',
+            '__proto__',
+            'Object',
+            'Array',
+        ]
+
+        if (!jsKeywords.includes(functionName)) {
+            functionNames.push(functionName)
+        }
+    }
+
+    return [...new Set(functionNames)] // Убираем дубликаты
+}
+
+/**
  * Создает безопасный фильтр для фильтрации данных на основе строкового выражения
  * @param expression Строковое выражение для фильтрации
  * @param config Конфигурация фильтра
@@ -45,27 +679,61 @@ function normalizeExpression(expression: string): string {
  */
 export function createSafeFilter<T>(
     expression: string,
-    config: FilterConfig<T> = {},
+    config: FilterConfig<T> = { skipValidation: false },
 ): (data: T) => boolean {
     try {
-        // Нормализуем выражение перед компиляцией
-        const normalizedExpression = normalizeExpression(expression)
+        // Check security of the expression BEFORE compilation
+        if (!config.skipValidation) {
+            validateExpressionSecurity(expression, [
+                ...safeFunctions,
+                ...Object.keys(config.extraFunctions || {}),
+            ])
+        }
 
-        // Компилируем выражение без дополнительных опций
+        // Normalize the expression BEFORE compilation
+        const normalizedExpression = normalizeExpression(expression)
+        let filtrexExtraFunctions = { ...filtrexFunctions }
+        if (config.extraFunctions) {
+            filtrexExtraFunctions = {
+                ...filtrexExtraFunctions,
+                ...config.extraFunctions,
+            }
+        }
+
+        // Проверяем, что все функции в выражении существуют
+        const functionNames = extractFunctionNames(normalizedExpression)
+        const availableFunctions = [
+            ...Object.keys(filtrexFunctions),
+            ...Object.keys(config.extraFunctions || {}),
+        ]
+
+        const undefinedFunctions = functionNames.filter(
+            (func) => !availableFunctions.includes(func),
+        )
+
+        if (undefinedFunctions.length > 0) {
+            throw new Error(
+                `Undefined functions detected: ${undefinedFunctions.join(
+                    ', ',
+                )}`,
+            )
+        }
+
+        // Compile the expression without additional options
         const filter = compileExpression(normalizedExpression, {
-            extraFunctions: filtrexFunctions,
+            extraFunctions: filtrexExtraFunctions,
         })
+
+        // Delete all string literals (single and double quotes)
+        const expressionWithoutStrings = normalizedExpression.replace(
+            /(["'])(?:\\.|[^\\])*?\1/g,
+            '',
+        )
+        const usedFields =
+            expressionWithoutStrings.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || []
 
         // Создаем обертку для проверки разрешенных полей и операторов
         return (data: T) => {
-            // Удаляем все строковые литералы (одинарные и двойные кавычки)
-            const expressionWithoutStrings = normalizedExpression.replace(
-                /(["'])(?:\\.|[^\\])*?\1/g,
-                '',
-            )
-            const usedFields =
-                expressionWithoutStrings.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || []
-
             // Проверяем, что используются только разрешенные поля
             if (config.allowedFields) {
                 const hasUnauthorizedField = usedFields.some(
@@ -111,6 +779,8 @@ export function createSafeFilter<T>(
         throw new Error(`Error in createSafeFilter: ${error}`)
     }
 }
+
+
 
 export function sanitizeForEval(input: string): string {
     // Удаляем все потенциально опасные символы и конструкции

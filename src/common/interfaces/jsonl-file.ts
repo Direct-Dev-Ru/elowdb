@@ -14,7 +14,7 @@ export interface PaginatedResult<T> {
     page: number
 }
 
-export interface JSONLFileOptions<T extends { id: string | number }> {
+export interface JSONLFileOptions<T> {
     collectionName?: string
     decrypt?: (
         encryptedText: string,
@@ -58,7 +58,7 @@ export interface AdapterLine<T extends LineDbAdapter> {
     // read(fn?: (data: T) => boolean): Promise<T[]>
     // write(data: T | T[]): Promise<void>
 
-    insert(data: T | T[], options?: LineDbAdapterOptions): Promise<void>
+    insert(data: T | T[], options?: LineDbAdapterOptions): Promise<T[]>
     update(
         data: Partial<T> | Partial<T>[],
         filterData?: Partial<T>,

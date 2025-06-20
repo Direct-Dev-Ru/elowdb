@@ -20,22 +20,28 @@ export interface nextIdCollection<P> {
     nexIdFn: (item: Partial<P>) => string
 }
 
-export interface lineDbInitOptions {
-    collections: JSONLFileOptions<LineDbAdapter>[]
+export interface LineDbInitOptions {
+    cacheSize?: number
+    cacheTTL?: number // время жизни записи в кэше (мс)
+    mutex?: RWMutex
+    collections: JSONLFileOptions<unknown>[]
     dbFolder?: string
     partitions?: PartitionCollection<unknown>[]
-    nextIds?: nextIdCollection<unknown>[]
+    nextIdFn?: (
+        data: Partial<unknown>,
+        collectionName: string,
+    ) => Promise<string | number> //next id function
 }
 
 export interface LineDbOptions {
     cacheSize?: number
+    cacheTTL?: number // время жизни записи в кэше (мс)
     mutex?: RWMutex
     nextIdFn?: (
         data: Partial<unknown>,
         collectionName: string,
-    ) => Promise<string | number>
+    ) => Promise<string | number> //next id function
     objName?: string
-    cacheTTL?: number // время жизни записи в кэше (мс)
 }
 
 export interface JoinOptions<T extends LineDbAdapter, U extends LineDbAdapter> {

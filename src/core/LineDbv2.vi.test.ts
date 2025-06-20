@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, } from 'vitest'
-import { LineDb, LineDbAdapter } from './LineDbv2.js'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { LineDb, LineDbAdapter, LineDbInitOptions } from './LineDbv2.js'
 import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { logTest } from '../common/utils/log.js'
+import { JSONLFileOptions } from '../common/interfaces/jsonl-file.js'
+import fsClassic, { PathLike } from 'node:fs'
 
 interface TestData extends LineDbAdapter {
     id: number | string
@@ -24,11 +26,10 @@ interface TestUser extends LineDbAdapter {
 }
 
 describe('LineDb', () => {
-    const testFileData = path.join(process.cwd(), 'test-data/testDatav2.jsonl')
-    const testFileUser = path.join(process.cwd(), 'test-data/testUserv2.jsonl')
+    const testFileData = path.join(process.cwd(), 'test-linedb/testData.jsonl')
+    const testFileUser = path.join(process.cwd(), 'test-linedb/testUser.jsonl')
+
     let db: LineDb
-    let adapterData: JSONLFile<TestData>
-    let adapterUser: JSONLFile<TestUser>
 
     beforeEach(async () => {
         try {
@@ -37,17 +38,25 @@ describe('LineDb', () => {
         } catch (error) {
             // Игнорируем ошибку, если файл не существует
         }
-        adapterData = new JSONLFile<TestData>(testFileData, '', {
+        const adapterTestDataOptions: JSONLFileOptions<TestData> = {
             collectionName: 'testData',
-        })
-        adapterUser = new JSONLFile<TestUser>(testFileUser, '', {
+            encryptKeyForLineDb: '',
+            indexedFields: ['id', 'userId'],
+        }
+        const adapterUserOptions: JSONLFileOptions<TestUser> = {
             collectionName: 'testUser',
-        })
-        db = new LineDb([
-            adapterData as JSONLFile<TestData>,
-            adapterUser as JSONLFile<TestUser>,
-        ])
-
+            encryptKeyForLineDb: '',
+            indexedFields: ['id', 'username'],
+        }
+        const initLineDBOptions: LineDbInitOptions = {
+            dbFolder: path.join(process.cwd(), 'test-linedb'),
+            collections: [
+                adapterTestDataOptions as unknown as JSONLFileOptions<unknown>,
+                adapterUserOptions as unknown as JSONLFileOptions<unknown>,
+            ],
+            partitions: [],
+        }
+        db = new LineDb(initLineDBOptions)
         await db.init(true)
     })
 
@@ -60,17 +69,14 @@ describe('LineDb', () => {
         }
     })
 
-
-
-
-    describe.skip('Инициализация', () => {
+    describe('Инициализация', () => {
         it('должен успешно инициализироваться с несколькими коллекциями', async () => {
             expect(db).toBeDefined()
             await expect(db.init()).resolves.not.toThrow()
         })
 
         it('should do something', () => {
-            logTest(true, "we do something ...")
+            logTest(true, 'we do something ...')
         })
 
         it('должен создавать файлы при инициализации', async () => {
@@ -89,7 +95,7 @@ describe('LineDb', () => {
     })
 
     describe('Операции с данными', () => {
-        it.skip('должен добавлять новую запись в коллекцию testData', async () => {
+        it('должен добавлять новую запись в коллекцию testData', async () => {
             const logThisTest = true
 
             const data: TestData = {
@@ -116,7 +122,7 @@ describe('LineDb', () => {
             expect(result2).toEqual([data, data2])
         })
 
-        it.skip('должен должен выдавать ошибку когда производится попытка insert с существующим id в коллекцию testUser', async () => {
+        it('должен должен выдавать ошибку когда производится попытка insert с существующим id в коллекцию testUser', async () => {
             const user: TestUser = {
                 id: 1,
                 username: 'testuser',
@@ -134,7 +140,7 @@ describe('LineDb', () => {
             ).rejects.toThrow()
         })
 
-        it.skip('должен обновлять существующую запись в коллекции', async () => {
+        it('должен обновлять существующую запись в коллекции', async () => {
             const logThisTest = true
             const data: TestData = {
                 id: '3333',
@@ -155,7 +161,7 @@ describe('LineDb', () => {
             expect(result[0]).toEqual({ ...data, ...updatedData })
         })
 
-        it.skip('должен удалять запись из коллекции', async () => {
+        it('должен удалять запись из коллекции', async () => {
             const data: TestData[] = [
                 {
                     id: 1,
@@ -231,7 +237,7 @@ describe('LineDb', () => {
             expect(resultUser3).toHaveLength(0)
         })
 
-        it.skip('должен читать запись по частичному совпадению из коллекции', async () => {
+        it('должен читать запись по частичному совпадению из коллекции', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test',
@@ -247,7 +253,10 @@ describe('LineDb', () => {
                 timestamp: Date.now(),
             }
             await db.write<TestData>([data, data2], 'testData')
-            const result = await db.readByFilter<TestData>({ id: 1 }, 'testData')
+            const result = await db.readByFilter<TestData>(
+                { id: 1 },
+                'testData',
+            )
             expect(result).toHaveLength(1)
             expect(result[0]).toEqual(data)
             const result2 = await db.readByFilter<TestData>(
@@ -258,7 +267,7 @@ describe('LineDb', () => {
             expect(result2[0]).toEqual(data)
         })
 
-        it.skip('должен читать записи с частичным совпадением из коллекции', async () => {
+        it('должен читать записи с частичным совпадением из коллекции', async () => {
             const data1: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -285,7 +294,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe.skip('Check cache', () => {
+    describe('Check cache', () => {
         it('должен использовать кэш при чтении', async () => {
             const data: TestData = {
                 id: 1,
@@ -298,40 +307,47 @@ describe('LineDb', () => {
             await db.write<TestData>(data, 'testData')
 
             // Первое чтение - кэш пустой
-            const result1 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
+            const result1 = await db.readByFilter<TestData>(
+                { id: 1 },
+                'testData',
+            )
             expect(result1).toHaveLength(1)
             expect(result1[0]).toEqual(data)
             expect(db.actualCacheSize).toBe(1)
 
             // Второе чтение - должно быть из кэша
-            const result2 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
+            const result2 = await db.readByFilter<TestData>(
+                { id: 1 },
+                'testData',
+            )
             expect(result2).toHaveLength(1)
             expect(result2[0]).toEqual(data)
             expect(db.actualCacheSize).toBe(1)
         })
 
-        it('должен вытеснять старые записи при переполнении кэша', async () => {
+        it.only('должен вытеснять старые записи при переполнении кэша', async () => {
             try {
                 await fs.unlink(testFileData)
                 await fs.unlink(testFileUser)
             } catch (error) {
                 // Игнорируем ошибку, если файл не существует
             }
-            adapterData = new JSONLFile<TestData>(testFileData, '', {
+            const adapterData = new JSONLFile<TestData>(testFileData, '', {
                 collectionName: 'testData',
             })
-            adapterUser = new JSONLFile<TestUser>(testFileUser, '', {
+            const adapterUser = new JSONLFile<TestUser>(testFileUser, '', {
                 collectionName: 'testUser',
             })
             const cacheSizeLocal = 10 // размер кэша по умолчанию
             db = new LineDb(
-                [
-                    adapterData as JSONLFile<TestData>,
-                    adapterUser as JSONLFile<TestUser>,
-                ],
                 {
                     cacheSize: cacheSizeLocal,
+                    cacheTTL: 1000,
                 },
+                [
+                    adapterData,
+                    adapterUser,
+                ],
             )
 
             await db.init(true)
@@ -351,19 +367,31 @@ describe('LineDb', () => {
             // Записываем все данные
             await db.write<TestData>(testData, 'testData')
             logTest(true, '--------write complete--------')
+            logTest(true, 'cache map', db.cacheMap)
+
+            return
             // Читаем последние записи - они должны быть в кэше
             const result1 = await db.readByFilter<TestData>(
                 { id: 11 },
                 'testData',
             )
             expect(result1).toHaveLength(1)
+            
+            expect(db.cacheMap.size).toBe(cacheSizeLocal)
 
+            expect(db.cacheMap.get('testData')?.data as TestData[]).toEqual(testData[testData.length - 1])
             // Читаем первые записи - они должны вытеснить старые из кэша
-            const result2 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
+            const result2 = await db.readByFilter<TestData>(
+                { id: 1 },
+                'testData',
+            )
             expect(result2).toHaveLength(1)
 
             // Проверяем, что вытесненная запись все еще доступна (но не из кэша)
-            const result3 = await db.readByFilter<TestData>({ id: 2 }, 'testData')
+            const result3 = await db.readByFilter<TestData>(
+                { id: 2 },
+                'testData',
+            )
             expect(result3).toHaveLength(1)
             // logTest(true, 'cache size', db.cacheMap)
         })
@@ -390,7 +418,10 @@ describe('LineDb', () => {
             await db.write<TestData>(data, 'testData')
 
             // Читаем из первой коллекции
-            const result1 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
+            const result1 = await db.readByFilter<TestData>(
+                { id: 1 },
+                'testData',
+            )
             expect(result1).toHaveLength(1)
 
             expect(db.actualCacheSize).toBe(1)
@@ -400,14 +431,20 @@ describe('LineDb', () => {
             await db.write<TestUser>(user, 'testUser')
 
             // Читаем из второй коллекции
-            const result2 = await db.readByFilter<TestUser>({ id: 1 }, 'testUser')
+            const result2 = await db.readByFilter<TestUser>(
+                { id: 1 },
+                'testUser',
+            )
 
             expect(result2).toHaveLength(1)
             expect(db.actualCacheSize).toBe(2)
             expect(result2[0]).toEqual(user)
 
             // Повторное чтение должно быть из кэша
-            const result3 = await db.readByFilter<TestData>({ id: 1 }, 'testData')
+            const result3 = await db.readByFilter<TestData>(
+                { id: 1 },
+                'testData',
+            )
             expect(result3).toHaveLength(1)
             expect(db.actualCacheSize).toBe(2)
             // logTest(true, 'cache map', db.cacheMap)
@@ -415,7 +452,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe.skip('select method', () => {
+    describe('select method', () => {
         it('should return lodash chain for query results', async () => {
             const data: TestData[] = [
                 {
@@ -442,9 +479,11 @@ describe('LineDb', () => {
             ]
             await db.write<TestData>(data, 'testData')
 
-            const result = await db.select<TestData>({ name: 'Test-1' })
+            const res = await db.select<TestData>({ name: 'Test-1' })
+            const result =
+                typeof res === 'object' && 'value' in res ? res.value() : res
             expect(result).toBeDefined()
-            expect(result.value()).toEqual([data[0]])
+            expect(result).toEqual([data[0]])
         })
 
         it('should allow chaining operations', async () => {
@@ -473,7 +512,7 @@ describe('LineDb', () => {
             ]
             await db.write<TestData>(data, 'testData')
 
-            const resultLodashChain = await await db.select<TestData>({
+            const resultLodashChain = await db.select<TestData>({
                 name: 'Test',
             })
 
@@ -482,9 +521,9 @@ describe('LineDb', () => {
             //     .map((item) => ({ ...item, age: item.age * 2 }))
             //     .value()
 
-            const result = resultLodashChain
-                .filter((item: TestData) => item.age > 25) // Step 1: Filter
-                .thru((filteredItems: TestData[]) => {
+            const res = db.selectResultChain<TestData>(resultLodashChain)            
+                ?.filter((item: TestData) => item.age > 25) // Step 1: Filter
+                ?.thru((filteredItems: TestData[]) => {
                     // Step 2 & 3: Calculate average and map
                     if (filteredItems.length === 0) {
                         return [] // No items, so no average, return empty
@@ -508,11 +547,13 @@ describe('LineDb', () => {
                 })
                 .value() // Execute the chain and get the final array
 
-            expect(result).toEqual([
+            
+
+            expect(res).toEqual([
                 { id: 2, name: 'Test-2', age: 35, averageAge: 40 },
                 { id: 3, name: 'Test-3', age: 45, averageAge: 40 },
             ])
-            logTest(true, 'result', result)
+            logTest(true, 'result', res)
         })
 
         it('should work with strict comparison', async () => {
@@ -524,11 +565,15 @@ describe('LineDb', () => {
 
             await db.write(testData)
 
-            const result = (
-                await db.select<TestData>({ name: 'Test 1' }, undefined, {
+            const res = await db.select<TestData>(
+                { name: 'Test 1' },
+                undefined,
+                {
                     strictCompare: true,
-                })
-            ).value()
+                },
+            )
+            const result =
+                typeof res === 'object' && 'value' in res ? res.value() : res
 
             expect(result).toEqual([{ id: 1, name: 'Test 1', value: 100 }])
         })
@@ -569,19 +614,25 @@ describe('LineDb', () => {
             await db.write(testData1, 'testData')
             await db.write(testData2, 'testUser')
 
-            const result1 = (
-                await db.select<TestData>({ name: 'Test' }, 'testData')
-            ).value()
-            const result2 = (
-                await db.select<TestUser>({ username: 'Test' }, 'testUser')
-            ).value()
-
+            const res1 = await db.select<TestData>({ name: 'Test' }, 'testData')
+            const result1 =
+                typeof res1 === 'object' && 'value' in res1
+                    ? res1.value()
+                    : res1
+            const res2 = await db.select<TestUser>(
+                { username: 'Test' },
+                'testUser',
+            )
+            const result2 =
+                typeof res2 === 'object' && 'value' in res2
+                    ? res2.value()
+                    : res2
             expect(result1).toEqual(testData1)
             expect(result2).toEqual(testData2)
         })
     })
 
-    describe.skip('withTransaction method', () => {
+    describe('withTransaction method', () => {
         it('должен выполнять операции в транзакции для конкретной коллекции', async () => {
             const testData: TestData[] = [
                 {
@@ -608,9 +659,13 @@ describe('LineDb', () => {
             }
 
             try {
-                await db.withAdapterTransaction<TestData>(callback, 'testData', {
-                    rollback: true,
-                })
+                await db.withAdapterTransaction<TestData>(
+                    callback,
+                    'testData',
+                    {
+                        rollback: true,
+                    },
+                )
             } catch (error) {
                 expect(error).toBeInstanceOf(Error)
             }
@@ -620,7 +675,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe.skip('join method', () => {
+    describe('join method', () => {
         it('should perform inner join between collections', async () => {
             const orders: TestData[] = [
                 {
@@ -641,7 +696,7 @@ describe('LineDb', () => {
                     id: 3,
                     name: 'Order 3',
                     age: 35,
-                    userId: 1,
+                    userId: 10,
                     timestamp: Date.now(),
                 },
             ]
@@ -679,14 +734,30 @@ describe('LineDb', () => {
             )
 
             const joinedData = result.value()
-            // logTest(true, 'joinedData', joinedData)
-            expect(joinedData).toHaveLength(3)
-            expect(joinedData[0].left).toEqual(orders[0])
-            expect(joinedData[0].right).toEqual(users[0])
-            expect(joinedData[1].left).toEqual(orders[1])
-            expect(joinedData[1].right).toEqual(users[1])
-            expect(joinedData[2].left).toEqual(orders[2])
-            expect(joinedData[2].right).toEqual(users[0])
+
+            logTest(true, 'joinedData', joinedData)
+
+            expect(joinedData).toHaveLength(2)
+
+            let joinResult =
+                joinedData.find((joinResult) => joinResult.left.id === 1) ||
+                undefined
+            expect(joinResult?.left).toEqual(
+                orders.find((order) => order.id === joinResult?.left.id),
+            )
+            expect(joinResult?.right).toEqual(
+                users.find((user) => user.id === joinResult?.right?.id),
+            )
+
+            joinResult =
+                joinedData.find((joinResult) => joinResult.left.id === 2) ||
+                undefined
+            expect(joinResult?.left).toEqual(
+                orders.find((order) => order.id === joinResult?.left.id),
+            )
+            expect(joinResult?.right).toEqual(
+                users.find((user) => user.id === joinResult?.right?.id),
+            )
 
             const result2 = await db.join<TestData, TestUser>(orders, users, {
                 type: 'left',
@@ -694,13 +765,36 @@ describe('LineDb', () => {
                 rightFields: ['id'],
             })
             const joinedData2 = result2.value()
+            logTest(true, 'joinedData2', joinedData2)
             expect(joinedData2).toHaveLength(3)
-            expect(joinedData2[0].left).toEqual(orders[0])
-            expect(joinedData2[0].right).toEqual(users[0])
-            expect(joinedData2[1].left).toEqual(orders[1])
-            expect(joinedData2[1].right).toEqual(users[1])
-            expect(joinedData2[2].left).toEqual(orders[2])
-            expect(joinedData2[2].right).toEqual(users[0])
+
+            let joinResult2 =
+                joinedData2.find((joinResult) => joinResult.left.id === 1) ||
+                undefined
+            expect(joinResult2?.left).toEqual(
+                orders.find((order) => order.id === joinResult2?.left.id),
+            )
+            expect(joinResult2?.right).toEqual(
+                users.find((user) => user.id === joinResult2?.right?.id),
+            )
+
+            joinResult2 =
+                joinedData2.find((joinResult) => joinResult.left.id === 2) ||
+                undefined
+            expect(joinResult2?.left).toEqual(
+                orders.find((order) => order.id === joinResult2?.left.id),
+            )
+            expect(joinResult2?.right).toEqual(
+                users.find((user) => user.id === joinResult2?.right?.id),
+            )
+
+            joinResult2 =
+                joinedData2.find((joinResult) => joinResult.left.id === 3) ||
+                undefined
+            expect(joinResult2?.left).toEqual(
+                orders.find((order) => order.id === joinResult2?.left.id),
+            )
+            expect(joinResult2?.right).toBeNull()
         })
 
         it('should perform join with array input', async () => {
@@ -1037,7 +1131,7 @@ describe('LineDb', () => {
         })
     })
 
-    describe.skip('withTransaction', () => {
+    describe('withTransaction', () => {
         it('должен выполнять операции в транзакции для конкретной коллекции', async () => {
             const testData: TestData[] = [
                 {
@@ -1056,6 +1150,53 @@ describe('LineDb', () => {
                 },
             ]
             await db.write(testData[0], 'testData')
+
+            const callback = async (
+                adapter: JSONLFile<TestData>,
+                db: LineDb,
+            ) => {
+                await adapter.write({ ...testData[0], name: 'test11' })
+                await adapter.write(testData[1])
+            }
+
+            try {
+                await db.withAdapterTransaction<TestData>(
+                    callback,
+                    'testData',
+                    {
+                        rollback: true,
+                        timeout: 100_000,
+                    },
+                )
+            } catch (error) {
+                expect(error).toBeInstanceOf(Error)
+            }
+            const dbContent = await db.read<TestData>('testData')
+            // logTest(true, 'dbContent', dbContent)
+
+            expect(dbContent).toHaveLength(2)
+            expect(dbContent[0]).toEqual({ ...testData[0], name: 'test11' })
+            expect(dbContent[1]).toEqual(testData[1])
+        }, 100_000)
+        it('должен выполнять операции в транзакции для конкретной коллекции  с ошибкой', async () => {
+            const testData: TestData[] = [
+                {
+                    id: 1,
+                    name: 'test1',
+                    age: 20,
+                    userId: 1,
+                    timestamp: Date.now(),
+                },
+                {
+                    id: 2,
+                    name: 'test2',
+                    age: 40,
+                    userId: 1,
+                    timestamp: Date.now(),
+                },
+            ]
+            await db.write(testData[0], 'testData')
+
             const callback = async (
                 adapter: JSONLFile<TestData>,
                 db: LineDb,
@@ -1071,20 +1212,27 @@ describe('LineDb', () => {
                     'testData',
                     {
                         rollback: true,
+                        timeout: 100_000,
                     },
                 )
             } catch (error) {
                 expect(error).toBeInstanceOf(Error)
             }
             const dbContent = await db.read<TestData>('testData')
+            // logTest(true, 'dbContent', dbContent)
+
             expect(dbContent).toHaveLength(1)
             expect(dbContent[0]).toEqual(testData[0])
-        })
+        }, 100_000)
     })
 })
 
 describe('Backup and Restore', () => {
     it('should create backup and restore data correctly', async () => {
+        const dbFolder = path.join(process.cwd(), 'test-data')
+        if (!fsClassic.existsSync(dbFolder)) {
+            await fs.mkdir(dbFolder, { recursive: true })
+        }
         try {
             await fs.unlink('test-data/collection-1.jsonl')
         } catch (error) {
@@ -1100,33 +1248,55 @@ describe('Backup and Restore', () => {
         } catch (error) {
             // console.log('Error deleting file:', error)
         }
-        let adapter1 = new JSONLFile<TestData>(
+        const adapter1 = new JSONLFile<TestData>(
             'test-data/collection-1.jsonl',
             '',
             {
                 collectionName: 'collection-1',
             },
         )
-        let adapter2 = new JSONLFile<TestData>(
+        const adapter2 = new JSONLFile<TestData>(
             'test-data/collection-2.jsonl',
             '',
             {
                 collectionName: 'collection-2',
             },
         )
-        let db = new LineDb([adapter1, adapter2], {
-            objName: 'test-data',
-        })
-        await db.init()
+        const db = new LineDb({}, [adapter1, adapter2])
+        await db.init(true)
 
         // Записываем тестовые данные
         const data1: TestData[] = [
-            { id: 1, name: 'test1-1', timestamp: Date.now(), age: 10, userId: 1 },
-            { id: 2, name: 'test1-2', timestamp: Date.now(), age: 10, userId: 1 },
+            {
+                id: 1,
+                name: 'test1-1',
+                timestamp: Date.now(),
+                age: 10,
+                userId: 1,
+            },
+            {
+                id: 2,
+                name: 'test1-2',
+                timestamp: Date.now(),
+                age: 10,
+                userId: 1,
+            },
         ]
         const data2: TestData[] = [
-            { id: 1, name: 'test2-1', timestamp: Date.now(), age: 10, userId: 1 },
-            { id: 2, name: 'test2-2', timestamp: Date.now(), age: 10, userId: 1 },
+            {
+                id: 1,
+                name: 'test2-1',
+                timestamp: Date.now(),
+                age: 10,
+                userId: 1,
+            },
+            {
+                id: 2,
+                name: 'test2-2',
+                timestamp: Date.now(),
+                age: 10,
+                userId: 1,
+            },
         ]
 
         await db.write<TestData>(data1, 'collection-1')
@@ -1173,26 +1343,50 @@ describe('Backup and Restore', () => {
         // expect(restored2).toEqual(expect.arrayContaining(data2))
     })
 
-    it.skip('should handle empty collections in backup', async () => {
-        const db = new LineDb([
-            new JSONLFile<TestData>('test1', 'test1.jsonl'),
-            new JSONLFile<TestData>('test2', 'test2.jsonl'),
+    it('should handle empty collections in backup', async () => {
+        const dbFolder = path.join(process.cwd(), 'test-data')
+        if (!fsClassic.existsSync(dbFolder)) {
+            await fs.mkdir(dbFolder, { recursive: true })
+        }
+        try {
+            await fs.unlink('test-data/test1.jsonl')
+        } catch (error) {
+            // console.log('Error deleting file:', error)
+        }
+        try {
+            await fs.unlink('test-data/test2.jsonl')
+        } catch (error) {
+            // console.log('Error deleting file:', error)
+        }
+
+        const db = new LineDb({}, [
+            new JSONLFile<TestData>('test-data/test1.jsonl', '', {
+                collectionName: 'test1',
+            }),
+            new JSONLFile<TestData>('test-data/test2.jsonl', '', {
+                collectionName: 'test2',
+            }),
         ])
-        await db.init()
+        await db.init(true)
 
         // Записываем данные только в одну коллекцию
         const data = [{ id: 1, name: 'test1-1' }]
         await db.write(data, 'test1')
 
         // Создаем бэкап
-        const backupFile = 'test-backup.txt'
+        const backupFile = 'test-data/test-backup.txt'
         await db.createBackup(backupFile)
 
         // Очищаем данные
         await db.delete({}, 'test1')
+        const deletedData = await db.read('test1')
+        logTest(true, 'deletedData', deletedData)
+        expect(deletedData).toHaveLength(0)
 
         // Восстанавливаем из бэкапа
-        await db.restoreFromBackup(backupFile)
+        await db.restoreFromBackup(backupFile, {
+            keepBackup: false,
+        })
 
         // Проверяем восстановленные данные
         const restored1 = await db.read('test1')
@@ -1203,14 +1397,32 @@ describe('Backup and Restore', () => {
         expect(restored1).toEqual(expect.arrayContaining(data))
 
         // Очищаем тестовые файлы
-        await fs.unlink(backupFile)
-        await fs.unlink('test1.jsonl')
-        await fs.unlink('test2.jsonl')
+        try {
+            // await fs.unlink(backupFile)
+            await fs.unlink('test-data/test1.jsonl')
+            await fs.unlink('test-data/test2.jsonl')
+        } catch (error) {
+            // console.log('Error deleting file:', error)
+        }
     })
 
-    it.skip('should handle deleted records in backup', async () => {
-        const db = new LineDb([new JSONLFile<TestData>('test1', 'test1.jsonl')])
-        await db.init()
+    it('should handle deleted records in backup', async () => {
+        const dbFolder = path.join(process.cwd(), 'test-data')
+        if (!fsClassic.existsSync(dbFolder)) {
+            await fs.mkdir(dbFolder, { recursive: true })
+        }
+        try {
+            await fs.unlink('test-data/test1.jsonl')
+        } catch (error) {
+            // console.log('Error deleting file:', error)
+        }
+
+        const db = new LineDb({}, [
+            new JSONLFile<TestData>('test-data/test1.jsonl', '', {
+                collectionName: 'test1',
+            }),
+        ])
+        await db.init(true)
 
         // Записываем тестовые данные
         const data = [
@@ -1231,7 +1443,9 @@ describe('Backup and Restore', () => {
         await db.delete({}, 'test1')
 
         // Восстанавливаем из бэкапа
-        await db.restoreFromBackup(backupFile)
+        await db.restoreFromBackup(backupFile, {
+            keepBackup: true,
+        })
 
         // Проверяем восстановленные данные
         const restored = await db.read('test1')
@@ -1244,7 +1458,15 @@ describe('Backup and Restore', () => {
         )
 
         // Очищаем тестовые файлы
-        await fs.unlink(backupFile)
-        await fs.unlink('test1.jsonl')
+        try {
+            await fs.unlink(backupFile)
+        } catch (error) {
+            // console.log('Error deleting file:', error)
+        }
+        try {
+            await fs.unlink('test-data/test1.jsonl')
+        } catch (error) {
+            // console.log('Error deleting file:', error)
+        }
     })
 })

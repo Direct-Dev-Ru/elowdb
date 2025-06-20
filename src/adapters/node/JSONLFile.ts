@@ -92,15 +92,6 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     }
     #beginTransactionMutex = new RWMutex()
 
-    #isFlatType(value: unknown): boolean {
-        return (
-            typeof value === 'string' ||
-            typeof value === 'number' ||
-            typeof value === 'boolean' ||
-            value === null
-        )
-    }
-
     #filterIndexedFields(fields: (keyof T)[]): (keyof T)[] {
         if (!fields || fields.length === 0) return []
 
@@ -487,18 +478,19 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                       return acc
                   }, new Set<number | FilePosition>())
                 : positions
+        const readedPositions = new Set<number>()
         try {
             // for (const [_, posArray] of positions) {
             for (const pos of setOfPositions) {
                 const readPosition =
                     pos instanceof FilePosition ? pos.position : pos
                 if (readPosition < 0) continue // Пропускаем удаленные записи
-                // if (readedPositions.includes(readPosition)) continue // Пропускаем уже прочитанные записи
+                if (readedPositions.has(readPosition)) continue // Пропускаем уже прочитанные записи
 
                 const buffer = Buffer.alloc(this.#allocSize)
                 await fileHandle.read(buffer, 0, this.#allocSize, readPosition)
                 const line = buffer.toString().trim()
-                // readedPositions.push(readPosition)
+                readedPositions.add(readPosition)
 
                 if (line.length === 0) continue
 
@@ -1259,9 +1251,21 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
 
             const filteredPositionsById = new Set<number | FilePosition>(
                 Array.from(allPositions.entries())
-                    .map(([_, value]) => value)
+                    .map(([_, value]) => {
+                        return value
+                    })
                     .flat(),
             )
+            // const filteredPositionsById = new Set<number | FilePosition>(
+            //     Array.from(allPositions.entries())
+            //         .map(([_, value]) => {
+            //             if (value instanceof FilePosition) {
+            //                 return value.position
+            //             }
+            //             return value
+            //         })
+            //         .flat(),
+            // )
 
             //  this.#logTest('read filteredPositions', filteredPositionsById)
             return this.#readRecords(filteredPositionsById)
@@ -1388,21 +1392,23 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 // Обрабатываем существующие записи
                 for (const [posId, existingPositions] of existingIds) {
                     // get item with updating data from dataArray by id
-                    let id = posId
-                    if (id.toString().includes(':')) {
-                        const splittedId = id.toString().split(':')
-                        id = splittedId[1]
+
+                    let posItemId = posId
+                    if (posItemId.toString().includes(':')) {
+                        const splittedId = posItemId.toString().split(':')
+                        posItemId = splittedId[1]
                     }
+                    // posItemId = Number(posItemId)
 
                     const item = dataArray.find((item) => {
                         if (typeof item.id === 'string') {
-                            return item.id === id
+                            return item.id === posItemId.toString()
                         }
-                        return item.id === Number(id)
+                        return item.id === Number(posItemId)
                     })
                     if (!item) {
                         throw new Error(
-                            `Item with id ${id} not found in dataArray. Data for update is corrupted`,
+                            `Item with id ${posItemId} not found in dataArray. Data for update is corrupted`,
                         )
                     }
                     // lets calculate other indexes of existing line to reindex them
@@ -1421,15 +1427,17 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     if (newIndexesToReindex.length > 0) {
                         // ok first read existing record by id
                         const existingRecord = await this.readByFilter(
-                            { id } as Partial<T>,
+                            { id: posItemId },
                             { ...options, inTransaction: true },
                         )
                         if (existingRecord.length === 0) {
-                            throw new Error(`Record with id ${id} not found`)
+                            throw new Error(
+                                `Record with id ${posItemId} not found`,
+                            )
                         }
                         if (existingRecord.length > 1) {
                             throw new Error(
-                                `readByFilter: for id ${id} returned multiple records`,
+                                `readByFilter: for id ${posItemId} returned multiple records`,
                             )
                         }
                         fullCurrentIndexes = this.#idFn(existingRecord[0])
@@ -1586,7 +1594,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
 
             try {
                 for (const item of dataArray) {
-                    if (existingIds.has(item.id)) {
+                    if (existingIds.has(item.id.toString())) {
                         continue
                     }
                     // get line from item
@@ -1730,7 +1738,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 this.#idFn,
             )
             //  this.#logTest('Reading data by positions:', positions)
-            return this.#readRecords(positions)
+            return this.#readRecords(positions, filterFunction)
         }
         if (this.#inTransactionMode || options.inTransaction) {
             // запуск без блокировок
@@ -1744,6 +1752,23 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         (record: Partial<T>) => {
             return Object.entries(filterData).every(([key, value]) => {
                 const recordValue = record[key as keyof T]
+                if (key === 'id') {
+                    // Пытаемся преобразовать recordValue к числу
+                    const recordValueNum = Number(recordValue)
+                    const valueNum = Number(value)
+
+                    const resultAsNumbers =
+                        !isNaN(recordValueNum) && !isNaN(valueNum)
+                            ? recordValueNum === valueNum
+                            : false
+                    if (resultAsNumbers) {
+                        return resultAsNumbers
+                    }
+                    const strValue = value.toString().trim()
+                    const strRecordValue = String(recordValue).toString().trim()
+                    return strRecordValue === strValue
+                }
+
                 if (
                     typeof value === 'string' &&
                     typeof recordValue === 'string' &&
@@ -1790,26 +1815,65 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             filter instanceof Function ? filter : (data: Partial<T>) => true
 
         let doIndexedSearch = false
-
+        const isPartial_T = isPartialT<T>(filter as object)
+        const isMongoDbLikeFilter_T = isMongoDbLikeFilter(filter as object)
         if (filter instanceof Function) {
             doIndexedSearch = true
             filterFunctionForIndexedSearch = filter
             filterFunction = filter
             filterData = {}
-        } else {
+        } else if (
+            filter &&
+            (typeof filter === 'string' ||
+                options.filterType === 'string' ||
+                options.filterType === 'filtrex')
+        ) {
+            // if filter is string, we need to check if it is indexed field
+            // this.#logTest('test type:', 'filter is string')
+            if (this.#constructorOptions.indexedFields) {
+                try {
+                    filterFunctionForIndexedSearch = createSafeFilter<
+                        Partial<T>
+                    >(filter as string, {
+                        allowedFields: this.#constructorOptions.indexedFields,
+                    })
+                    doIndexedSearch = true
+                } catch (error) {
+                    doIndexedSearch = false
+                }
+            }
+            filterFunction = createSafeFilter<Partial<T>>(filter as string)
+            filterData = {}
+        } else if (
+            filter &&
+            ((typeof filter === 'object' &&
+                isPartial_T &&
+                !isMongoDbLikeFilter_T) ||
+                options.filterType === 'object' ||
+                options.filterType === 'base')
+        ) {
+            // this.#logTest('test type:', 'simple')
+            // we need build filter function as simple compare algorithm
+            filterData = filter
+            doIndexedSearch = true
+            filterFunctionForIndexedSearch = this.#fallbackFilter(
+                filterData as Partial<T>,
+                options,
+            )
+            filterFunction = filterFunctionForIndexedSearch
+        } else if (filter && typeof filter === 'object') {
+            // our filter is in mongoDB style
             if (
-                filter &&
-                (typeof filter === 'string' ||
-                    options.filterType === 'string' ||
-                    options.filterType === 'filtrex')
+                isMongoDbLikeFilter(filter) ||
+                options.filterType === 'sift' ||
+                options.filterType === 'mongodb'
             ) {
-                // if filter is string, we need to check if it is indexed field
-                // this.#logTest('test type:', 'filter is string')
+                // this.#logTest('test type:', 'mongodb')
                 if (this.#constructorOptions.indexedFields) {
                     try {
-                        filterFunctionForIndexedSearch = createSafeFilter<
+                        filterFunctionForIndexedSearch = createSafeSiftFilter<
                             Partial<T>
-                        >(filter as string, {
+                        >(filter, {
                             allowedFields:
                                 this.#constructorOptions.indexedFields,
                         })
@@ -1818,57 +1882,17 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                         doIndexedSearch = false
                     }
                 }
-                filterFunction = createSafeFilter<Partial<T>>(filter as string)
+
+                filterFunction = createSafeSiftFilter<Partial<T>>(filter)
                 filterData = {}
-            } else if (
-                filter &&
-                typeof filter === 'object' &&
-                isPartialT<T>(filter) &&
-                !isMongoDbLikeFilter(filter) &&
-                (options.filterType === 'object' ||
-                    options.filterType === 'base')
-            ) {
-                // this.#logTest('test type:', 'simple')
-                // we need build filter function as simple compare algorithm
-                filterData = filter
+            } else {
                 doIndexedSearch = true
                 filterFunctionForIndexedSearch = this.#fallbackFilter(
-                    filterData as Partial<T>,
+                    filter as Partial<T>,
                     options,
                 )
                 filterFunction = filterFunctionForIndexedSearch
-            } else if (filter && typeof filter === 'object') {
-                // our filter is in mongoDB style
-                if (
-                    isMongoDbLikeFilter(filter) ||
-                    options.filterType === 'sift' ||
-                    options.filterType === 'mongodb'
-                ) {
-                    // this.#logTest('test type:', 'mongodb')
-                    if (this.#constructorOptions.indexedFields) {
-                        try {
-                            filterFunctionForIndexedSearch =
-                                createSafeSiftFilter<Partial<T>>(filter, {
-                                    allowedFields:
-                                        this.#constructorOptions.indexedFields,
-                                })
-                            doIndexedSearch = true
-                        } catch (error) {
-                            doIndexedSearch = false
-                        }
-                    }
-
-                    filterFunction = createSafeSiftFilter<Partial<T>>(filter)
-                    filterData = {}
-                } else {
-                    doIndexedSearch = true
-                    filterFunctionForIndexedSearch = this.#fallbackFilter(
-                        filter as Partial<T>,
-                        options,
-                    )
-                    filterFunction = filterFunctionForIndexedSearch
-                    filterData = filter as Partial<T>
-                }
+                filterData = filter as Partial<T>
             }
         }
 
@@ -1881,15 +1905,6 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     options,
                     filterFunctionForIndexedSearch,
                 )
-                // this.#logTest('indexedResults', indexedResults)
-                // this.#logTest('indexedResults length', indexedResults.length)
-                // const endTimeToReadWithFilter = Date.now()
-                // this.#logTest(
-                //     'time to read with filter',
-                //     endTimeToReadWithFilter - startTimeToReadWithFilter,
-                //     endTimeToReadWithFilter,
-                //     startTimeToReadWithFilter,
-                // )
             } catch (error) {
                 if (error instanceof Error) {
                     // this.#logTest('Error message:', error.message)
@@ -1968,7 +1983,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     async insert(
         data: (Partial<T> | T) | (Partial<T> | T)[],
         options?: LineDbAdapterOptions,
-    ): Promise<void> {
+    ): Promise<T[]> {
         this.#ensureInitialized()
         if (!options) {
             options = this.#defaultMethodsOptions
@@ -2056,7 +2071,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                             .join(', ')}`,
                     )
                 }
-                return await this.write(mergedData as T[], options)
+                await this.write(mergedData as T[], options)
+                return mergedData as T[]
             }
 
             // if not in transaction, open transaction like update
@@ -2078,9 +2094,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 },
             )
             await this.endTransaction()
-            return
+            return mergedData as T[]
         }
-        return undefined
+        return [] as T[]
     }
 
     async update(

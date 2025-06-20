@@ -255,7 +255,9 @@ export class FilePositions {
         idFn?: (data: T) => (string | number)[],
     ): Promise<void> {
         await this.mutex.withWriteLock(async () => {
-            const ids = idFn ? idFn(data) : [`byId:${data.id}`]
+            const ids = (idFn ? idFn(data) : [`byId:${data.id}`]).filter(
+                (id) => !id.toString().includes(':undefined'),
+            )
             for (const id of ids) {
                 const positions = this.positions.get(id) || []
                 if (!positions.includes(position)) {
@@ -271,8 +273,13 @@ export class FilePositions {
         position: number | FilePosition,
         idFn?: (data: T) => (string | number)[],
     ): Promise<void> {
-        const ids = idFn ? idFn(data) : [`byId:${data.id}`]
+        const ids = (idFn ? idFn(data) : [`byId:${data.id}`]).filter(
+            (id) => !id.toString().includes(':undefined'),
+        )
         for (const id of ids) {
+            if (id.toString().includes(':undefined')) {
+                continue
+            }
             const positions = this.positions.get(id) || []
             const exists = positions.some((p) => {
                 if (p instanceof FilePosition) {
