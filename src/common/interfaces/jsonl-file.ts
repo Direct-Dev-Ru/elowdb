@@ -25,6 +25,7 @@ export interface JSONLFileOptions<T> {
         cypherKey: string,
     ) => Promise<string | { error: string }>
     allocSize?: number
+    convertStringIdToNumber?: boolean // if true, then id will be string representation of number, it converts to number
     idFn?: (data: T) => (string | number)[]
     decryptKey?: string // This key will be used to decrypt the file and stay it unencrypted (_cypherKey is null)
     encryptKeyForLineDb?: string // This key will be used then adapter is used inside LineDb init method

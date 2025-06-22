@@ -95,7 +95,7 @@ describe('LineDb', () => {
     })
 
     describe('Data operations', () => {
-        it.only('should add new record to testData collection', async () => {
+        it('should add new record to testData collection', async () => {
             const logThisTest = true
 
             const data: TestData = {
