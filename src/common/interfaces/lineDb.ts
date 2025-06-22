@@ -12,7 +12,7 @@ export interface CacheEntry<T> {
 
 export interface PartitionCollection<P> {
     collectionName: string
-    partIdFn: (item: Partial<P>) => string
+    partIdFn: ((item: Partial<P>) => string) | string
 }
 
 export interface nextIdCollection<P> {

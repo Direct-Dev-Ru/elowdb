@@ -1,0 +1,34 @@
+# Пример конфигурационного файла для LineDB
+# Сохраните этот файл и установите переменную окружения LINEDB_INITFILE_PATH
+
+# Основные настройки кэша
+cacheSize: 2000
+cacheTTL: 300000  # 5 минут в миллисекундах
+
+# Папка для хранения данных
+dbFolder: "./data"
+
+# Коллекции
+collections:
+  - collectionName: "users"
+    encryptKeyForLineDb: ""
+    indexedFields: ["id", "email", "name"]
+    allocSize: 512
+    skipInvalidLines: true
+    
+  - collectionName: "orders"
+    encryptKeyForLineDb: ""
+    indexedFields: ["id", "userId", "status"]
+    allocSize: 1024
+    skipInvalidLines: true
+    
+  - collectionName: "products"
+    encryptKeyForLineDb: ""
+    indexedFields: ["id", "category", "price"]
+    allocSize: 256
+    skipInvalidLines: true
+
+# Партиционирование
+partitions:
+  - collectionName: "orders"
+    partIdFn: "userId"  # В YAML функции партиционирования будут строковыми именами полей 

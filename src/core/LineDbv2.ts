@@ -14,6 +14,7 @@ import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 import { chain, CollectionChain } from 'lodash'
 
 import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'
+import { YAMLFile } from '../adapters/node/YAMLFile.js'
 import { defNodeDecrypt, defNodeEncrypt } from '../adapters/node/TextFile.js'
 import {
     FilterFunction,
@@ -372,11 +373,73 @@ export class LineDb {
         return this.#nextIdFn === defaultNextIdFn
     }
 
+    /**
+     * Преобразует строковое представление функции партиционирования в реальную функцию
+     * @param partIdFn - строка с именем поля или функция
+     * @returns функция партиционирования
+     */
+    #parsePartitionFunction(partIdFn: string | ((item: Partial<unknown>) => string)): (item: Partial<unknown>) => string {
+        if (typeof partIdFn === 'function') {
+            return partIdFn
+        }
+        
+        // Если это строка, создаем функцию, которая возвращает значение поля
+        return (item: Partial<unknown>) => {
+            const value = item[partIdFn as keyof typeof item]
+            return value ? String(value) : 'default'
+        }
+    }
+
+    /**
+     * Читает опции инициализации из YAML файла, указанного в переменной окружения LINEDB_INITFILE_PATH
+     * @returns Promise<LineDbInitOptions | null> - опции инициализации или null, если файл не найден
+     */
+    async #readInitOptionsFromYamlFile(): Promise<LineDbInitOptions | null> {
+        const initFilePath = process.env.LINEDB_INITFILE_PATH
+        if (!initFilePath) {
+            return null
+        }
+
+        try {
+            // Проверяем существование файла
+            if (!fsClassic.existsSync(initFilePath)) {
+                logTest(logForTest, `Init file not found: ${initFilePath}`)
+                return null
+            }
+
+            // Создаем YAMLFile адаптер для чтения конфигурации
+            const yamlAdapter = new YAMLFile<LineDbInitOptions>(initFilePath)
+            
+            // Читаем данные из файла (YAMLFile возвращает один объект, а не массив)
+            const configData = await yamlAdapter.read()
+            if (!configData) {
+                logTest(logForTest, `Init file is empty: ${initFilePath}`)
+                return null
+            }
+
+            logTest(logForTest, `Loaded init options from: ${initFilePath}`, configData)
+            return configData
+        } catch (error) {
+            logTest(logForTest, `Error reading init file ${initFilePath}:`, error)
+            return null
+        }
+    }
+
     async init(
         force: boolean = false,
         initOptions?: LineDbInitOptions,
     ): Promise<void> {
         let skipSomeActions = false
+        
+        // Пытаемся прочитать опции из YAML файла, если не переданы явно
+        if (!initOptions && !this.#initOptions) {
+            const yamlInitOptions = await this.#readInitOptionsFromYamlFile()
+            if (yamlInitOptions) {
+                initOptions = yamlInitOptions
+                this.#initOptions = yamlInitOptions
+            }
+        }
+        
         if (!initOptions && this.#initOptions) {
             initOptions = this.#initOptions
         } else if (initOptions) {
@@ -415,7 +478,7 @@ export class LineDb {
             for (const partition of initOptions?.partitions || []) {
                 this.#partitionFunctions.set(
                     partition.collectionName,
-                    partition.partIdFn,
+                    this.#parsePartitionFunction(partition.partIdFn),
                 )
             }
             this.#initOptions = initOptions
