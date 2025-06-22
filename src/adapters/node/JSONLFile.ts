@@ -2180,7 +2180,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     }
                 }
                 if (existingRecords.length === 0) {
-                    existingRecords = await this.readByFilter(item, options)
+                    const filterObject = 'id' in item ? { id: item.id } : item
+                    existingRecords = await this.readByFilter(filterObject, options)
                 }
 
                 const updatedRecords = existingRecords.map((record) => {

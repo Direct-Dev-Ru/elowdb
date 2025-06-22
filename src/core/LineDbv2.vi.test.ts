@@ -94,8 +94,8 @@ describe('LineDb', () => {
         })
     })
 
-    describe('Операции с данными', () => {
-        it('должен добавлять новую запись в коллекцию testData', async () => {
+    describe('Data operations', () => {
+        it.only('should add new record to testData collection', async () => {
             const logThisTest = true
 
             const data: TestData = {
@@ -105,12 +105,13 @@ describe('LineDb', () => {
                 userId: 1,
                 timestamp: Date.now(),
             }
-            await db.write<TestData>(data, 'testData')
+            await db.insert<TestData>(data, 'testData')
             const result = await db.read<TestData>('testData')
             expect(result).toHaveLength(1)
-            expect(result[0]).toEqual(data)
-            const data2: TestData = {
-                id: -1,
+            expect(result[0]).toEqual({...data, id: 1})
+            
+            // add another new record with not existing id
+            const data2: Partial<TestData> = {                
                 name: 'Test 2',
                 age: 40,
                 userId: 1,
@@ -119,10 +120,28 @@ describe('LineDb', () => {
             await db.insert<TestData>(data2, 'testData')
             const result2 = await db.read<TestData>('testData')
             logTest(logThisTest, result2, [data, data2])
-            expect(result2).toEqual([data, data2])
+            expect(result2).toHaveLength(2)
+            expect(result2[0]).toEqual({...data, id: 1})
+            expect(result2[1]).toEqual({...data2, id: 2})
+
+            // add another new record with existing id
+            const data3: TestData = {
+                id: 3,
+                name: 'Test 3',
+                age: 30,
+                userId: 1,
+                timestamp: Date.now(),
+            }
+            await db.insert<TestData>(data3, 'testData')
+            const result3 = await db.read<TestData>('testData')
+            logTest(logThisTest, result3, [data, data2, data3])
+            expect(result3).toHaveLength(3)
+            expect(result3[0]).toEqual({...data, id: 1})
+            expect(result3[1]).toEqual({...data2, id: 2})
+            expect(result3[2]).toEqual({...data3, id: 3})
         })
 
-        it('должен должен выдавать ошибку когда производится попытка insert с существующим id в коллекцию testUser', async () => {
+        it('should throw error when insert with existing id in testUser collection', async () => {
             const user: TestUser = {
                 id: 1,
                 username: 'testuser',
@@ -140,25 +159,66 @@ describe('LineDb', () => {
             ).rejects.toThrow()
         })
 
-        it('должен обновлять существующую запись в коллекции', async () => {
+        it('should update existing record in collection', async () => {
             const logThisTest = true
-            const data: TestData = {
-                id: '3333',
-                name: 'Test',
+            const data: TestData[] = [{
+                id: 3333,
+                name: 'Test 3333',
                 age: 25,
                 userId: 1,
                 timestamp: Date.now(),
+            },
+            {
+                id: 4444,
+                name: 'Test 4444',
+                age: 35,
+                userId: 1,
+                timestamp: Date.now(),
             }
+            ]
             await db.write<TestData>(data, 'testData')
-
-            const updatedData = { id: '3333', age: 45 }
-            await db.update<TestData>(updatedData, 'testData')
-            // await db.write<TestData>(updatedData as TestData, 'testData')
-
-            const result = await db.read<TestData>('testData')
-            logTest(logThisTest, result, updatedData)
+            // update one record
+            const updatedData = { id: 3333, age: 45 }
+            const updatedResult = await db.update<TestData>(updatedData, 'testData')
+            expect(updatedResult).toHaveLength(1)
+            const result = await db.readByFilter<TestData>({ id: 3333 }, 'testData')
             expect(result).toHaveLength(1)
-            expect(result[0]).toEqual({ ...data, ...updatedData })
+            expect(result[0]).toEqual({ ...data[0], ...updatedData })
+
+            // update several records 
+            // const updatedResult2 = await db.update<TestData>([{ id: 3333, name: 'updated 3333' }, { id: 4444, name: 'updated 4444' }], 'testData', { userId: 1 })
+            const updatedResult2 = await db.update<TestData>([{ id: 3333, name: 'updated 3333' }, { id: 4444, name: 'updated 4444' }], 'testData')
+            logTest(logThisTest, "updatedResult2:", updatedResult2)
+            const result2 = await db.readByFilter<TestData>({ userId: 1 }, 'testData')
+            logTest(logThisTest, "result2", result2)
+            expect(result2).toHaveLength(2)
+            expect(result2[0]).toEqual({ ...result[0], ...{ name: 'updated 3333' } })
+            expect(result2[1]).toEqual({ ...data[1], ...{ name: 'updated 4444' } })
+
+            // update several records with filter
+            const updatedResult3 = await db.update<TestData>({ age: 55 }, 'testData', `age > 30`)
+            logTest(logThisTest, "updatedResult3:", updatedResult3)
+            const result3 = await db.readByFilter<TestData>(`age == 55`, 'testData')
+            logTest(logThisTest, "result3", result3)
+            expect(result3).toHaveLength(2)
+            expect(result3[0].age).toEqual(55)
+            expect(result3[1].age).toEqual(55)
+
+            // update several records with ids in data and filter
+
+            const updatedResult4 = await db.update<TestData>([
+                { id: 3333, name: 'Update #3333' },
+                { id: 4444, name: 'Update #4444' }, 
+                { id: 5555, name: 'Update #5555' }
+            ],
+                'testData', `id == 3333 || id == 4444`)
+            logTest(logThisTest, "updatedResult4:", updatedResult4)
+            const result4 = await db.readByFilter<TestData>(`id == 3333 || id == 4444`, 'testData')
+            logTest(logThisTest, "result4", result4)
+            expect(result4).toHaveLength(2)
+            expect(result4[0]).toEqual({ ...result3[0], ...{ name: 'Update #3333' } })
+            expect(result4[1]).toEqual({ ...result3[1], ...{ name: 'Update #4444' } })
+
         })
 
         it('должен удалять запись из коллекции', async () => {
@@ -325,7 +385,7 @@ describe('LineDb', () => {
             expect(db.actualCacheSize).toBe(1)
         })
 
-        it.only('должен вытеснять старые записи при переполнении кэша', async () => {
+        it('должен вытеснять старые записи при переполнении кэша', async () => {
             try {
                 await fs.unlink(testFileData)
                 await fs.unlink(testFileUser)
@@ -342,7 +402,7 @@ describe('LineDb', () => {
             db = new LineDb(
                 {
                     cacheSize: cacheSizeLocal,
-                    cacheTTL: 1000,
+                    cacheTTL: 10_000,
                 },
                 [
                     adapterData,
@@ -366,26 +426,37 @@ describe('LineDb', () => {
 
             // Записываем все данные
             await db.write<TestData>(testData, 'testData')
-            logTest(true, '--------write complete--------')
-            logTest(true, 'cache map', db.cacheMap)
 
-            return
+
+            expect(db.cacheMap.size).toBe(cacheSizeLocal)
+            let someCacheData = db.cacheMap.get('testData:11')?.data as unknown as TestData
+            expect(someCacheData).toBeDefined()
+            expect(someCacheData.id).toBe(11)
+            expect(someCacheData.name).toBe('Test - 11')
+            someCacheData = db.cacheMap.get('testData:1')?.data as unknown as TestData
+            expect(someCacheData).not.toBeDefined()
+            someCacheData = db.cacheMap.get('testData:2')?.data as unknown as TestData
+            expect(someCacheData).toBeDefined()
+
             // Читаем последние записи - они должны быть в кэше
             const result1 = await db.readByFilter<TestData>(
                 { id: 11 },
                 'testData',
             )
             expect(result1).toHaveLength(1)
-            
             expect(db.cacheMap.size).toBe(cacheSizeLocal)
 
-            expect(db.cacheMap.get('testData')?.data as TestData[]).toEqual(testData[testData.length - 1])
-            // Читаем первые записи - они должны вытеснить старые из кэша
+
+            // Читаем первe. записи - они должны вытеснить старые из кэша
             const result2 = await db.readByFilter<TestData>(
                 { id: 1 },
                 'testData',
             )
             expect(result2).toHaveLength(1)
+            someCacheData = db.cacheMap.get('testData:2')?.data as unknown as TestData
+            expect(someCacheData).not.toBeDefined()
+            someCacheData = db.cacheMap.get('testData:1')?.data as unknown as TestData
+            expect(someCacheData).toBeDefined()
 
             // Проверяем, что вытесненная запись все еще доступна (но не из кэша)
             const result3 = await db.readByFilter<TestData>(
@@ -393,7 +464,11 @@ describe('LineDb', () => {
                 'testData',
             )
             expect(result3).toHaveLength(1)
-            // logTest(true, 'cache size', db.cacheMap)
+            // после чтения запись должна быть в кэше
+            someCacheData = db.cacheMap.get('testData:2')?.data as unknown as TestData
+            expect(someCacheData).toBeDefined()
+            expect(db.cacheMap.size).toBe(cacheSizeLocal)
+
         })
 
         it('должен корректно работать с разными коллекциями', async () => {
@@ -521,7 +596,7 @@ describe('LineDb', () => {
             //     .map((item) => ({ ...item, age: item.age * 2 }))
             //     .value()
 
-            const res = db.selectResultChain<TestData>(resultLodashChain)            
+            const res = db.selectResultChain<TestData>(resultLodashChain)
                 ?.filter((item: TestData) => item.age > 25) // Step 1: Filter
                 ?.thru((filteredItems: TestData[]) => {
                     // Step 2 & 3: Calculate average and map
@@ -547,7 +622,7 @@ describe('LineDb', () => {
                 })
                 .value() // Execute the chain and get the final array
 
-            
+
 
             expect(res).toEqual([
                 { id: 2, name: 'Test-2', age: 35, averageAge: 40 },

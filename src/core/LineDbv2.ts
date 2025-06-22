@@ -33,6 +33,7 @@ import {
     compressToBase64,
     decompressFromBase64,
 } from '../common/utils/strings.js'
+import { compareIdsLikeNumbers } from '../common/utils/compare.js'
 
 export {
     CacheEntry,
@@ -66,7 +67,7 @@ class LastIdManager {
     private lastIds: Map<string, number> = new Map()
     private mutex: RWMutex = new RWMutex()
 
-    private constructor() {}
+    private constructor() { }
 
     static getInstance(): LastIdManager {
         if (!LastIdManager.instance) {
@@ -841,12 +842,12 @@ export class LineDb {
     async update<T extends LineDbAdapter>(
         data: Partial<T> | Partial<T>[],
         collectionName?: string,
-        options: LineDbAdapterOptions = { inTransaction: false },
         filter?:
             | Partial<T>
             | Record<string, unknown>
             | string
             | FilterFunction<T>,
+        options: LineDbAdapterOptions = { inTransaction: false },
     ): Promise<T[]> {
         if (!collectionName) {
             collectionName = this.firstCollection
@@ -870,15 +871,17 @@ export class LineDb {
                     })
                     if (existingItems.length > 0) {
                         for (const existingItem of existingItems) {
+                            const dataCandidate = dataArray.find(item => compareIdsLikeNumbers(item.id, existingItem.id)) ?? dataArray[0]
                             updatedData.push({
                                 ...existingItem,
-                                ...dataArray[0],
+                                ...dataCandidate,
                             } as T)
                         }
                     }
                 } else {
                     for (const item of dataArray) {
-                        const existingItem = await adapter.readByFilter(item, {
+                        const filterObject = 'id' in item ? { id: item.id } : item
+                        const existingItem = await adapter.readByFilter(filterObject, {
                             strictCompare: true,
                             inTransaction:
                                 this.#inTransaction || options.inTransaction,
@@ -1220,11 +1223,11 @@ export class LineDb {
             optimisticRead?: boolean
             returnChain?: boolean
         } = {
-            strictCompare: false,
-            inTransaction: false,
-            optimisticRead: false,
-            returnChain: false,
-        },
+                strictCompare: false,
+                inTransaction: false,
+                optimisticRead: false,
+                returnChain: false,
+            },
     ): Promise<CollectionChain<T> | T[]> {
         const results = await this.readByFilter<T>(
             data,
@@ -1280,59 +1283,59 @@ export class LineDb {
             leftData =
                 typeof leftCollection === 'string'
                     ? await this.readByFilter<T>(
-                          options.leftFilter,
-                          typeof leftCollection === 'string'
-                              ? leftCollection
-                              : undefined,
-                          {
-                              strictCompare: options.strictCompare,
-                              inTransaction: options.inTransaction,
-                          },
-                      )
+                        options.leftFilter,
+                        typeof leftCollection === 'string'
+                            ? leftCollection
+                            : undefined,
+                        {
+                            strictCompare: options.strictCompare,
+                            inTransaction: options.inTransaction,
+                        },
+                    )
                     : await this.#filterByData<T>(
-                          options.leftFilter,
-                          leftCollection,
-                          {
-                              strictCompare: options.strictCompare,
-                          },
-                      )
+                        options.leftFilter,
+                        leftCollection,
+                        {
+                            strictCompare: options.strictCompare,
+                        },
+                    )
         }
         if (options.rightFilter) {
             rightData =
                 typeof rightCollection === 'string'
                     ? await this.readByFilter<U>(
-                          options.rightFilter,
-                          typeof rightCollection === 'string'
-                              ? rightCollection
-                              : undefined,
-                          {
-                              strictCompare: options.strictCompare,
-                              inTransaction: options.inTransaction,
-                          },
-                      )
+                        options.rightFilter,
+                        typeof rightCollection === 'string'
+                            ? rightCollection
+                            : undefined,
+                        {
+                            strictCompare: options.strictCompare,
+                            inTransaction: options.inTransaction,
+                        },
+                    )
                     : await this.#filterByData<U>(
-                          options.rightFilter,
-                          rightCollection,
-                          {
-                              strictCompare: options.strictCompare,
-                          },
-                      )
+                        options.rightFilter,
+                        rightCollection,
+                        {
+                            strictCompare: options.strictCompare,
+                        },
+                    )
         }
 
         if (leftData.length === 0) {
             leftData = Array.isArray(leftCollection)
                 ? leftCollection
                 : await this.read<T>(leftCollection, {
-                      inTransaction: options.inTransaction as boolean,
-                  })
+                    inTransaction: options.inTransaction as boolean,
+                })
         }
 
         if (rightData.length === 0) {
             rightData = Array.isArray(rightCollection)
                 ? rightCollection
                 : await this.read<U>(rightCollection, {
-                      inTransaction: options.inTransaction as boolean,
-                  })
+                    inTransaction: options.inTransaction as boolean,
+                })
         }
 
         const result: { left: T; right: U | null }[] = []
@@ -1465,7 +1468,7 @@ export class LineDb {
                 path.join(
                     os.tmpdir(),
                     crypto.randomBytes(8).toString('hex') +
-                        '-linedb-backup.backup',
+                    '-linedb-backup.backup',
                 )
             try {
                 if (lineDbTransactionOptions.rollback) {
@@ -1618,11 +1621,11 @@ export class LineDb {
             gzip?: boolean
             keepBackup?: boolean
         } = {
-            gzip: false,
-            encryptKey: '',
-            collectionNames: [],
-            keepBackup: false,
-        },
+                gzip: false,
+                encryptKey: '',
+                collectionNames: [],
+                keepBackup: false,
+            },
     ): Promise<{ error: string } | void> {
         const mutexLocal = this.#mutex
         let content: string = await fs.readFile(backupFile, 'utf-8')
@@ -1773,9 +1776,8 @@ export class LineDb {
         } catch (error) {
             // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
             return {
-                error: `Error restoring from backup: ${
-                    (error as Error).message
-                }`,
+                error: `Error restoring from backup: ${(error as Error).message
+                    }`,
             }
         }
     }
