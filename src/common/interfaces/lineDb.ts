@@ -43,6 +43,14 @@ export interface LineDbOptions {
     ) => Promise<string | number> //next id function
     objName?: string
 }
+export interface BackupMetaData {
+    collectionNames: string[]
+    gzip: boolean
+    encryptKey: string
+    noLock: boolean
+    timestamp: number
+    backupDate: string
+}
 
 export interface JoinOptions<T extends LineDbAdapter, U extends LineDbAdapter> {
     type: JoinType

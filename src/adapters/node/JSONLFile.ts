@@ -195,7 +195,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                                 .split(',')
                                 .map(
                                     (field) =>
-                                        `by${capitalize(field)}:${data[field as keyof T]
+                                        `by${capitalize(field)}:${
+                                            data[field as keyof T]
                                         }`,
                                 ),
                             `byId:${data.id}`,
@@ -266,11 +267,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 const filePositions =
                     this.#inTransactionMode || options.inTransaction
                         ? await LinePositionsManager.getFilePositionsNoLock(
-                            this.#filename.toString(),
-                        )
+                              this.#filename.toString(),
+                          )
                         : await LinePositionsManager.getFilePositions(
-                            this.#filename.toString(),
-                        )
+                              this.#filename.toString(),
+                          )
                 if (options.inTransaction) {
                     await filePositions.clearNoLock()
                 } else {
@@ -333,11 +334,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     async #compressFile(inTransaction: boolean = false): Promise<void> {
         const filePositions = inTransaction
             ? await LinePositionsManager.getFilePositionsNoLock(
-                this.#filename.toString(),
-            )
+                  this.#filename.toString(),
+              )
             : await LinePositionsManager.getFilePositions(
-                this.#filename.toString(),
-            )
+                  this.#filename.toString(),
+              )
         const hasDeletedRecords = this.$hasDeletedRecords
 
         if (!hasDeletedRecords) {
@@ -396,7 +397,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 maxLineLength > 0 &&
                 this.#allocSize - maxLineLength > this.#allocSize / 2 &&
                 this.#allocSize / 2 - maxLineLength >
-                (this.#allocSize / 2) * 0.2
+                    (this.#allocSize / 2) * 0.2
             ) {
                 let newAllocSize = 64
                 while (newAllocSize < maxLineLength * 1.2) {
@@ -473,9 +474,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const setOfPositions: Set<number | FilePosition> =
             positions instanceof Map
                 ? Array.from(positions.values()).reduce((acc, val) => {
-                    val.forEach((pos) => acc.add(pos))
-                    return acc
-                }, new Set<number | FilePosition>())
+                      val.forEach((pos) => acc.add(pos))
+                      return acc
+                  }, new Set<number | FilePosition>())
                 : positions
         const readedPositions = new Set<number>()
         try {
@@ -714,11 +715,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const filePositions =
             this.#inTransactionMode || inTransaction
                 ? await LinePositionsManager.getFilePositionsNoLock(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
                 : await LinePositionsManager.getFilePositions(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
 
         // Initial read file under write lock
         const payload = async () => {
@@ -747,7 +748,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     )
                     if (line.length > this.#allocSize) {
                         throw new Error(
-                            `Line length ${line.length
+                            `Line length ${
+                                line.length
                             } is greater than allocSize ${this.#allocSize}`,
                         )
                     }
@@ -892,7 +894,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 maxLineLength > 0 &&
                 this.#allocSize - maxLineLength > this.#allocSize / 2 &&
                 this.#allocSize / 2 - maxLineLength >
-                (this.#allocSize / 2) * 0.2
+                    (this.#allocSize / 2) * 0.2
             ) {
                 let newAllocSize = 64
                 while (newAllocSize < maxLineLength * 1.2) {
@@ -906,8 +908,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             this.#inTransactionMode || inTransaction
                 ? await payload()
                 : await filePositions
-                    .getMutex()
-                    .withWriteLock(payload, timeoutMs)
+                      .getMutex()
+                      .withWriteLock(payload, timeoutMs)
 
         return readResult &&
             typeof readResult === 'object' &&
@@ -933,11 +935,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const filePositions =
             this.#inTransactionMode || options.inTransaction
                 ? await LinePositionsManager.getFilePositionsNoLock(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
                 : await LinePositionsManager.getFilePositions(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
         // Функция для чтения всех строк из файла
         const payload = async () => {
             for await (const line of rl) {
@@ -1057,12 +1059,12 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     }
 
     async #delete(
-        data: Partial<T> | Partial<T>[],
+        data: Partial<T> | Partial<T>[] | string,
         options: LineDbAdapterOptions = {
             inTransaction: false,
             strictCompare: true,
         },
-    ): Promise<number> {
+    ): Promise<number | Partial<T>[]> {
         this.#ensureInitialized()
         if (
             this.#transaction &&
@@ -1076,16 +1078,17 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const filePositions =
             this.#inTransactionMode || options.inTransaction
                 ? await LinePositionsManager.getFilePositionsNoLock(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
                 : await LinePositionsManager.getFilePositions(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
 
         const dataArray = Array.isArray(data) ? data : [data]
 
-        const payload = async (): Promise<number> => {
+        const payload = async (): Promise<number | Partial<T>[]> => {
             let deletedCount = 0
+            const deletedRecords: Partial<T>[] = []
             for (const item of dataArray) {
                 const positions = await filePositions.getPositionByDataNoLock(
                     item as T,
@@ -1093,20 +1096,39 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                         ? (data: T) => [`byId:${data.id}`]
                         : this.#idFn,
                 )
-                // если нашли по индексу что то то удаляем по этим данным
+                // если нашли по индексу что то, то удаляем по этим данным
                 if (positions.size > 0) {
                     const fileHandle = await fs.promises.open(
                         this.#filename,
                         'r+',
                     )
                     try {
+                        const processedPositions = new Set<number>()
                         for (const [id, posArray] of positions) {
                             for (const pos of posArray) {
-                                // Заполняем строку пробелами
+                                const currentPosition =
+                                    pos instanceof FilePosition
+                                        ? pos.position
+                                        : pos
+                                // if position is already processed, skip
+                                if (processedPositions.has(currentPosition)) {
+                                    continue
+                                }
+                                processedPositions.add(currentPosition)
+                                // Fill line with spaces
                                 const emptyLine = `${' '.repeat(
                                     this.#allocSize - 1,
                                 )}\n`
-
+                                const record = await this.#readRecords(
+                                    new Set([currentPosition]),
+                                )
+                                // add to deletedRecords if record is found
+                                if (record) {
+                                    deletedRecords.push({
+                                        id: record[0].id,
+                                    } as Partial<T>)
+                                }
+                                // deleting record in file - fill by spaces
                                 const writePosition =
                                     pos instanceof FilePosition
                                         ? pos.position
@@ -1137,34 +1159,25 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     const allPositions =
                         await filePositions.getAllPositionsNoLock('byId:')
 
-                    const filterFn = (record: Partial<T>) => {
-                        return Object.entries(item).every(([key, value]) => {
-                            const recordValue = record[key as keyof T]
+                    const filter =
+                        typeof item === 'string'
+                            ? createSafeFilter<T>(item, {
+                                  skipValidation: true,
+                              })
+                            : this.#fallbackFilter(item, options)
 
-                            // Если значение в data - строка, проверяем вхождение
-                            if (
-                                typeof value === 'string' &&
-                                typeof recordValue === 'string' &&
-                                options?.strictCompare == false
-                            ) {
-                                return recordValue
-                                    .toLowerCase()
-                                    .includes(value.toLowerCase())
-                            }
-                            // Для остальных типов проверяем строгое равенство
-                            return recordValue === value
-                        })
-                    }
                     const records = await this.#readRecords(
                         allPositions,
-                        filterFn,
+                        filter,
                     )
+
                     const emptyLine = `${' '.repeat(this.#allocSize - 1)}\n`
                     const fileHandle = await fs.promises.open(
                         this.#filename,
                         'r+',
                     )
                     try {
+                        const processedPositions = new Set<number>()
                         for (const record of records) {
                             const positions =
                                 await filePositions.getPositionByDataNoLock(
@@ -1174,6 +1187,26 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                             if (positions.size > 0) {
                                 for (const [id, posArray] of positions) {
                                     for (const pos of posArray) {
+                                        const currentPosition =
+                                            pos instanceof FilePosition
+                                                ? pos.position
+                                                : pos
+                                        // if position is already processed, skip
+                                        if (
+                                            processedPositions.has(
+                                                currentPosition,
+                                            )
+                                        ) {
+                                            continue
+                                        }
+                                        processedPositions.add(currentPosition)
+                                        // add to deletedRecords if record is found
+                                        if (record) {
+                                            deletedRecords.push({
+                                                id: record.id,
+                                            } as Partial<T>)
+                                        }
+                                        // deleting record in file - fill by spaces
                                         const writePosition =
                                             pos instanceof FilePosition
                                                 ? pos.position
@@ -1213,7 +1246,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     }
                 }
             }
-            return deletedCount
+            return deletedRecords
         }
         if (this.#inTransactionMode || options.inTransaction) {
             // запуск без блокировок
@@ -1232,11 +1265,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const filePositions =
             this.#inTransactionMode || options.inTransaction
                 ? await LinePositionsManager.getFilePositionsNoLock(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
                 : await LinePositionsManager.getFilePositions(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
 
         const payload = async () => {
             const allPositions = await filePositions.getAllPositionsNoLock()
@@ -1360,19 +1393,21 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const filePositions =
             this.#inTransactionMode || options.inTransaction
                 ? await LinePositionsManager.getFilePositionsNoLock(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
                 : await LinePositionsManager.getFilePositions(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
 
         // Convert single object to array
-        const dataArray = this.#constructorOptions.convertStringIdToNumber ?
-            (Array.isArray(data) ? data : [data])
-                .map((item) => ({
-                    ...item, id: isNaN(Number(item.id)) ? item.id :
-                        Number(item.id)
-                })) : (Array.isArray(data) ? data : [data])
+        const dataArray = this.#constructorOptions.convertStringIdToNumber
+            ? (Array.isArray(data) ? data : [data]).map((item) => ({
+                  ...item,
+                  id: isNaN(Number(item.id)) ? item.id : Number(item.id),
+              }))
+            : Array.isArray(data)
+            ? data
+            : [data]
 
         const payload = async () => {
             // Проверяем существование файла и открываем с нужным флагом
@@ -1485,7 +1520,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                         )
                         if (line.length > this.#allocSize) {
                             throw new Error(
-                                `Line length ${line.length
+                                `Line length ${
+                                    line.length
                                 } is greater than allocSize ${this.#allocSize}`,
                             )
                         }
@@ -1537,26 +1573,26 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
 
                             const filePosition: FilePosition =
                                 existingFilePositions &&
-                                    existingFilePositions.length > 0
+                                existingFilePositions.length > 0
                                     ? (existingFilePositions.find(
-                                        (position) => {
-                                            if (
-                                                position instanceof
-                                                FilePosition
-                                            ) {
-                                                return (
-                                                    position.position ===
-                                                    writePosition
-                                                )
-                                            }
-                                            return false
-                                        },
-                                    ) as FilePosition)
+                                          (position) => {
+                                              if (
+                                                  position instanceof
+                                                  FilePosition
+                                              ) {
+                                                  return (
+                                                      position.position ===
+                                                      writePosition
+                                                  )
+                                              }
+                                              return false
+                                          },
+                                      ) as FilePosition)
                                     : new FilePosition(
-                                        writePosition,
-                                        //   false,
-                                        //   crypto.randomUUID(),
-                                    )
+                                          writePosition,
+                                          //   false,
+                                          //   crypto.randomUUID(),
+                                      )
 
                             for (const index of indexesToAdd) {
                                 if (typeof index !== 'string') {
@@ -1619,7 +1655,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                         )
                         if (line.length > this.#allocSize) {
                             throw new Error(
-                                `Line length ${line.length
+                                `Line length ${
+                                    line.length
                                 } is greater than allocSize ${this.#allocSize}`,
                             )
                         }
@@ -1670,20 +1707,20 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             options = this.#defaultMethodsOptions.inTransaction
                 ? this.#defaultMethodsOptions
                 : {
-                    inTransaction: false,
-                    strictCompare: false,
-                }
+                      inTransaction: false,
+                      strictCompare: false,
+                  }
         }
         this.#transactionGuard(options)
 
         const filePositions =
             this.#inTransactionMode || options.inTransaction
                 ? await LinePositionsManager.getFilePositionsNoLock(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
                 : await LinePositionsManager.getFilePositions(
-                    this.#filename.toString(),
-                )
+                      this.#filename.toString(),
+                  )
         // we need to read all indexes byIndexedFields: and then deserialize content after : and filter
         if (Object.keys(data).length === 0) {
             // Get all positions from indexed fields
@@ -1750,38 +1787,35 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
 
     #fallbackFilter =
         (filterData: Partial<T>, options: LineDbAdapterOptions) =>
-            (record: Partial<T>) => {
-                return Object.entries(filterData).every(([key, value]) => {
-                    const recordValue = record[key as keyof T]
-                    if (key === 'id') {
-                        // Пытаемся преобразовать recordValue к числу
-                        const recordValueNum = Number(recordValue)
-                        const valueNum = Number(value)
-
-                        const resultAsNumbers =
-                            !isNaN(recordValueNum) && !isNaN(valueNum)
-                                ? recordValueNum === valueNum
-                                : false
-                        if (resultAsNumbers) {
-                            return resultAsNumbers
-                        }
-                        const strValue = value.toString().trim()
-                        const strRecordValue = String(recordValue).toString().trim()
-                        return strRecordValue === strValue
+        (record: Partial<T>) => {
+            return Object.entries(filterData).every(([key, value]) => {
+                const recordValue = record[key as keyof T]
+                if (key === 'id') {
+                    // Пытаемся преобразовать recordValue к числу
+                    const recordValueNum = Number(recordValue)
+                    const valueNum = Number(value)
+                    const bothAreNumbers =
+                        !isNaN(recordValueNum) && !isNaN(valueNum)
+                    if (bothAreNumbers) {
+                        return recordValueNum === valueNum
                     }
+                    const strValue = value.toString().trim()
+                    const strRecordValue = String(recordValue).toString().trim()
+                    return strRecordValue === strValue
+                }
 
-                    if (
-                        typeof value === 'string' &&
-                        typeof recordValue === 'string' &&
-                        options?.strictCompare == false
-                    ) {
-                        return recordValue
-                            .toLowerCase()
-                            .includes(value.toLowerCase())
-                    }
-                    return recordValue === value
-                })
-            }
+                if (
+                    typeof value === 'string' &&
+                    typeof recordValue === 'string' &&
+                    options?.strictCompare == false
+                ) {
+                    return recordValue
+                        .toLowerCase()
+                        .includes(value.toLowerCase())
+                }
+                return recordValue === value
+            })
+        }
 
     async readByFilter(
         filter:
@@ -1796,10 +1830,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             options = this.#defaultMethodsOptions.inTransaction
                 ? this.#defaultMethodsOptions
                 : {
-                    inTransaction: false,
-                    strictCompare: true,
-                    filterType: 'object',
-                }
+                      inTransaction: false,
+                      strictCompare: true,
+                      filterType: 'object',
+                  }
         }
 
         this.#transactionGuard(options)
@@ -1847,8 +1881,12 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             filterData = {}
         } else if (
             filter &&
-            ((typeof filter === 'object' && isPartial_T && !isMongoDbLikeFilter_T) ||
-                ((options.filterType === 'object' || options.filterType === 'base') && !isMongoDbLikeFilter_T))
+            ((typeof filter === 'object' &&
+                isPartial_T &&
+                !isMongoDbLikeFilter_T) ||
+                ((options.filterType === 'object' ||
+                    options.filterType === 'base') &&
+                    !isMongoDbLikeFilter_T))
         ) {
             // this.#logTest('test type:', 'simple')
             // we need build filter function as simple compare algorithm
@@ -1933,39 +1971,40 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     }
 
     async delete(
-        data: Partial<T> | Partial<T>[],
+        data: Partial<T> | Partial<T>[] | string,
         options?: LineDbAdapterOptions,
-    ): Promise<number> {
+    ): Promise<number | Partial<T>[]> {
         this.#ensureInitialized()
         if (!options) {
             options = this.#defaultMethodsOptions
         }
         this.#transactionGuard(options)
 
-        // Если уже в транзакции, просто вызываем приватный метод
+        // if we are already in transaction, just call private method
         if (options.inTransaction) {
-            return await this.#delete(data, options)
+            return (await this.#delete(data, options)) as Partial<T>[]
         }
 
-        // Если не в транзакции, открываем транзакцию
+        // if we are not in transaction, open transaction
         const transactionId = await this.beginTransaction({
             rollback: true,
             timeout: 20_000,
         })
 
-        let result: number = 0
+        let result: Partial<T>[] = []
         try {
             await this.withTransaction(
                 async (adapter, txOptions) => {
-                    const deletedCount = await adapter.#delete(data, {
+                    const deleted = await adapter.#delete(data, {
                         ...options,
                         inTransaction: true,
                         transactionId,
                     })
-                    result = deletedCount
+                    result = deleted as Partial<T>[]
                     await this.endTransaction()
                 },
                 {
+                    ...options,
                     inTransaction: true,
                     transactionId,
                 },
@@ -2179,7 +2218,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 }
                 if (existingRecords.length === 0) {
                     const filterObject = 'id' in item ? { id: item.id } : item
-                    existingRecords = await this.readByFilter(filterObject, options)
+                    existingRecords = await this.readByFilter(
+                        filterObject,
+                        options,
+                    )
                 }
 
                 const updatedRecords = existingRecords.map((record) => {
@@ -2373,10 +2415,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             options = this.#defaultMethodsOptions.inTransaction
                 ? this.#defaultMethodsOptions
                 : {
-                    inTransaction: false,
-                    strictCompare: true,
-                    filterType: 'base',
-                }
+                      inTransaction: false,
+                      strictCompare: true,
+                      filterType: 'base',
+                  }
         }
         this.#transactionGuard(options)
 
@@ -2519,8 +2561,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             throw new Error(
                 `Transaction Error: transaction id does not match: ${this
                     .#transaction?.transactionId} \n ${JSON.stringify(
-                        options,
-                    )}`,
+                    options,
+                )}`,
             )
         }
     }
@@ -2598,7 +2640,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     }
                 }
                 throw new Error(
-                    `Error in transaction mode. Rollback: ${transactionLocal?.rollback ? 'done' : 'not done'
+                    `Error in transaction mode. Rollback: ${
+                        transactionLocal?.rollback ? 'done' : 'not done'
                     }. ${this.#collectionName}: ${err}`,
                 )
             }
@@ -2619,7 +2662,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             }
 
             throw new Error(
-                `Error in transaction mode. Rollback: ${transactionLocal?.rollback ? 'done' : 'not done'
+                `Error in transaction mode. Rollback: ${
+                    transactionLocal?.rollback ? 'done' : 'not done'
                 }. ${this.#collectionName}: ${err}`,
             )
         } finally {

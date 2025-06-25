@@ -6,7 +6,7 @@ cacheSize: 2000
 cacheTTL: 300000  # 5 минут в миллисекундах
 
 # Папка для хранения данных
-dbFolder: "./data"
+dbFolder: "./test-linedb-yaml"
 
 # Коллекции
 collections:

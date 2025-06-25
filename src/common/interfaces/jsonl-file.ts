@@ -68,7 +68,7 @@ export interface AdapterLine<T extends LineDbAdapter> {
     delete(
         data: Partial<T> | Partial<T>[],
         options?: LineDbAdapterOptions,
-    ): Promise<number>
+    ): Promise<number | Partial<T>[]>
     select(
         fn: (data: T) => boolean,
         options?: LineDbAdapterOptions,

@@ -640,10 +640,10 @@ describe('LineDb Partitioning Tests', () => {
         await db.update(
             updatedItem,
             'test',
+            'id == 1',
             {
                 inTransaction: false,
             },
-            'id == 1',
         )
 
         // Check that item moved to 2024 partition

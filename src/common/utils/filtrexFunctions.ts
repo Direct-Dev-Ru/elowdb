@@ -140,6 +140,47 @@ function strSubstring(s: string, start: number, end: number): string {
 }
 
 /**
+ * Проверяет, начинается ли строка с указанного префикса
+ * @param s - Входная строка
+ * @param prefix - Префикс
+ * @returns true если строка начинается с префикса
+ */
+function strStartsWith(s: string, prefix: string): boolean {
+    return s.startsWith(prefix)
+}
+
+/**
+ * Проверяет, заканчивается ли строка на указанный суффикс
+ * @param s - Входная строка
+ * @param suffix - Суффикс
+ * @returns true если строка заканчивается суффиксом
+ */
+function strEndsWith(s: string, suffix: string): boolean {
+    return s.endsWith(suffix)
+}
+
+/**
+ * Проверяет, содержит ли строка указанную подстроку
+ * @param s - Входная строка
+ * @param substring - Подстрока
+ * @returns true если строка содержит подстроку
+ */
+function strContains(s: string, substring: string): boolean {
+    return s.includes(substring)
+}
+
+/**
+ * Находит индекс первого вхождения подстроки в строку
+ * @param s - Входная строка
+ * @param substring - Подстрока
+ * @returns Индекс первого вхождения подстроки или -1 если не найдено
+ */
+function strIndexOf(s: string, substring: string): number {
+    return s.indexOf(substring)
+}
+
+
+/**
  * Получает год из временной метки
  * @param timestamp - Временная метка в миллисекундах
  * @returns Год
@@ -669,6 +710,10 @@ export const filtrexFunctions = {
     strRepeat,
     strSlice,
     strSubstring,
+    strStartsWith,
+    strEndsWith,
+    strContains,
+    strIndexOf,
 
     // Функции для работы с датами
     getFullYear,

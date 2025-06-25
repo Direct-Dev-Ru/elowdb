@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -14,27 +15,32 @@ import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 import { chain, CollectionChain } from 'lodash'
 
 import { JSONLFile, TransactionOptions } from '../adapters/node/JSONLFile.js'
-import { YAMLFile } from '../adapters/node/YAMLFile.js'
 import { defNodeDecrypt, defNodeEncrypt } from '../adapters/node/TextFile.js'
+import { YAMLFile } from '../adapters/node/YAMLFile.js'
 import {
     FilterFunction,
     JSONLFileOptions,
     LineDbAdapterOptions,
 } from '../common/interfaces/jsonl-file.js'
 import {
+    BackupMetaData,
     CacheEntry,
     JoinOptions,
     LineDbAdapter,
     LineDbInitOptions,
     LineDbOptions,
 } from '../common/interfaces/lineDb.js'
+import { compareIdsLikeNumbers } from '../common/utils/compare.js'
+import {
+    isValidFilterString,
+    parseFilterString,
+} from '../common/utils/filterParser.js'
 import { logTest } from '../common/utils/log.js'
 import { nextPowerOf2 } from '../common/utils/numbers.js'
 import {
     compressToBase64,
     decompressFromBase64,
 } from '../common/utils/strings.js'
-import { compareIdsLikeNumbers } from '../common/utils/compare.js'
 
 export {
     CacheEntry,
@@ -68,7 +74,7 @@ class LastIdManager {
     private lastIds: Map<string, number> = new Map()
     private mutex: RWMutex = new RWMutex()
 
-    private constructor() { }
+    private constructor() {}
 
     static getInstance(): LastIdManager {
         if (!LastIdManager.instance) {
@@ -378,11 +384,13 @@ export class LineDb {
      * @param partIdFn - строка с именем поля или функция
      * @returns функция партиционирования
      */
-    #parsePartitionFunction(partIdFn: string | ((item: Partial<unknown>) => string)): (item: Partial<unknown>) => string {
+    #parsePartitionFunction(
+        partIdFn: string | ((item: Partial<unknown>) => string),
+    ): (item: Partial<unknown>) => string {
         if (typeof partIdFn === 'function') {
             return partIdFn
         }
-        
+
         // Если это строка, создаем функцию, которая возвращает значение поля
         return (item: Partial<unknown>) => {
             const value = item[partIdFn as keyof typeof item]
@@ -404,24 +412,34 @@ export class LineDb {
             // Проверяем существование файла
             if (!fsClassic.existsSync(initFilePath)) {
                 logTest(logForTest, `Init file not found: ${initFilePath}`)
-                return null
+                throw new Error(`Init file not found: ${initFilePath}`)
             }
 
             // Создаем YAMLFile адаптер для чтения конфигурации
             const yamlAdapter = new YAMLFile<LineDbInitOptions>(initFilePath)
-            
+
             // Читаем данные из файла (YAMLFile возвращает один объект, а не массив)
             const configData = await yamlAdapter.read()
             if (!configData) {
                 logTest(logForTest, `Init file is empty: ${initFilePath}`)
-                return null
+                throw new Error(
+                    `Init file is empty or corrupted: ${initFilePath}`,
+                )
             }
 
-            logTest(logForTest, `Loaded init options from: ${initFilePath}`, configData)
+            logTest(
+                logForTest,
+                `Loaded init options from: ${initFilePath}`,
+                configData,
+            )
             return configData
         } catch (error) {
-            logTest(logForTest, `Error reading init file ${initFilePath}:`, error)
-            return null
+            logTest(
+                logForTest,
+                `Error reading init file ${initFilePath}:`,
+                error,
+            )
+            throw new Error(`Error reading init file ${initFilePath}: ${error}`)
         }
     }
 
@@ -430,7 +448,7 @@ export class LineDb {
         initOptions?: LineDbInitOptions,
     ): Promise<void> {
         let skipSomeActions = false
-        
+
         // Пытаемся прочитать опции из YAML файла, если не переданы явно
         if (!initOptions && !this.#initOptions) {
             const yamlInitOptions = await this.#readInitOptionsFromYamlFile()
@@ -439,7 +457,7 @@ export class LineDb {
                 this.#initOptions = yamlInitOptions
             }
         }
-        
+
         if (!initOptions && this.#initOptions) {
             initOptions = this.#initOptions
         } else if (initOptions) {
@@ -524,7 +542,9 @@ export class LineDb {
                 }
             }
         }
-
+        if (this.#adapters.size === 0) {
+            throw new Error('No collections found in init options')
+        }
         // Инициализация адаптеров и lastId
         for (const [collectionName, adapter] of this.#adapters) {
             if (this.#partitionFunctions.get(collectionName)) {
@@ -631,6 +651,10 @@ export class LineDb {
         return await this.#lastIdManager.getLastId(collectionName)
     }
 
+    // Read all records from collection or from partition
+    // if partition name is presented in parameter
+    // or if partition name is presented in collection name
+    // or if partition name is presented in collection name and partition name is presented in parameter
     async read<T extends LineDbAdapter>(
         collectionName?: string,
         options: { inTransaction: boolean } = { inTransaction: false },
@@ -638,19 +662,57 @@ export class LineDb {
         if (!collectionName) {
             collectionName = this.firstCollection
         }
-        const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
-        if (!adapter) {
-            throw new Error(`Collection ${collectionName} not found`)
+
+        // Проверяем, есть ли функция партиционирования для этой коллекции
+        const splitOfCollectionName = collectionName.split('_')
+        const partitionFn = this.#partitionFunctions.get(
+            splitOfCollectionName[0],
+        )
+
+        if (!partitionFn) {
+            // Если нет функции партиционирования, используем стандартное чтение
+            const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
+            if (!adapter) {
+                throw new Error(`Collection ${collectionName} not found`)
+            }
+            const payload = async () => {
+                return await adapter.read(undefined, {
+                    inTransaction:
+                        this.#inTransaction || options?.inTransaction,
+                })
+            }
+            if (this.#inTransaction || options?.inTransaction) {
+                return await payload()
+            }
+            return await this.#mutex.withReadLock(payload)
         }
-        const payload = async () => {
-            return await adapter.read(undefined, {
-                inTransaction: this.#inTransaction || options?.inTransaction,
-            })
+
+        // Если есть функция партиционирования, читаем из всех партиций
+        const partitionNameFromParameter =
+            splitOfCollectionName.length > 1
+                ? splitOfCollectionName[splitOfCollectionName.length - 1]
+                : undefined
+
+        const results: T[] = []
+
+        for (const [key, partitionAdapter] of this.#adapters) {
+            let condition = false
+
+            condition = partitionNameFromParameter
+                ? key === collectionName
+                : key.startsWith(`${collectionName}_`)
+
+            if (condition) {
+                const adapter = partitionAdapter as JSONLFile<T>
+                const partitionResults = await adapter.read(undefined, {
+                    inTransaction:
+                        this.#inTransaction || options?.inTransaction,
+                })
+                results.push(...partitionResults)
+            }
         }
-        if (this.#inTransaction || options?.inTransaction) {
-            return await payload()
-        }
-        return await this.#mutex.withReadLock(payload)
+
+        return results
     }
 
     async #filterByData<T extends LineDbAdapter>(
@@ -696,7 +758,7 @@ export class LineDb {
             splitOfCollectionName[0],
         )
         if (!partitionFn) {
-            // Если нет функции партиционирования, используем стандартное чтение
+            // if no partition function, use standard reading
             const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
             if (!adapter) {
                 throw new Error(`Collection ${collectionName} not found`)
@@ -705,39 +767,39 @@ export class LineDb {
             const payload = async () => {
                 const now = Date.now()
 
-                // Сначала проверяем кэш по id представленной записи
+                // Check cache by id of presented record
                 if (typeof data === 'object' && data.id) {
                     const cacheKey = `${collectionName}:${data.id}`
                     if (this.#cache.has(cacheKey)) {
                         const entry = this.#cache.get(cacheKey) as CacheEntry<T>
 
-                        // Проверяем, не устарела ли запись в кэше
+                        // Check if record in cache is expired
                         if (
                             this.#cacheTTL &&
                             now - entry.lastAccess > this.#cacheTTL
                         ) {
-                            // Запись устарела, удаляем её из кэша
+                            // Record is expired, delete it from cache
                             this.#cache.delete(cacheKey)
                             logTest(
                                 logForTest,
                                 `Cache entry expired for ${cacheKey}`,
                             )
                         } else {
-                            // Запись актуальна, обновляем время доступа и возвращаем
+                            // Record is actual, update access time and return it
                             entry.lastAccess = now
                             logTest(logForTest, `Cache hit for ${cacheKey}`)
                             return [entry.data]
                         }
                     }
                 }
-
+                // Read by filter
                 const results = await adapter.readByFilter(data, {
                     ...options,
                     inTransaction:
                         this.#inTransaction || options?.inTransaction || false,
                 })
 
-                // Обновляем кэш
+                // Update cache
                 for (const item of results) {
                     this.#updateCache(item, collectionName as string)
                 }
@@ -751,20 +813,28 @@ export class LineDb {
             return await this.#mutex.withReadLock(payload)
         }
 
+        // if partition function exists, read from all partitions or only from one
+        // if optimistic read or partition name is presented
+        // or if partition name is presented in parameter
         const partitionNameFromParameter =
             splitOfCollectionName.length > 1
                 ? splitOfCollectionName[splitOfCollectionName.length - 1]
                 : undefined
         const optimisticRead =
             options?.optimisticRead || partitionNameFromParameter
-        // Если есть функция партиционирования, читаем из всех партиций или только
-        // из одной если указана опция оптимистичного чтения или указана конкретная партиция
-        // или если указана конкретная партиция в параметре
         const results: T[] = []
         let condition = false
         for (const [key, partitionAdapter] of this.#adapters) {
-            if (!partitionNameFromParameter && optimisticRead) {
-                const partitionName = partitionFn(data)
+            if (
+                !partitionNameFromParameter &&
+                optimisticRead &&
+                key.startsWith(collectionName)
+            ) {
+                const dataToCalcPartition =
+                    typeof data === 'string' && isValidFilterString(data)
+                        ? parseFilterString(data)
+                        : data
+                const partitionName = partitionFn(dataToCalcPartition)
                 if (partitionName) {
                     condition = key === `${collectionName}_${partitionName}`
                 }
@@ -934,7 +1004,13 @@ export class LineDb {
                     })
                     if (existingItems.length > 0) {
                         for (const existingItem of existingItems) {
-                            const dataCandidate = dataArray.find(item => compareIdsLikeNumbers(item.id, existingItem.id)) ?? dataArray[0]
+                            const dataCandidate =
+                                dataArray.find((item) =>
+                                    compareIdsLikeNumbers(
+                                        item.id,
+                                        existingItem.id,
+                                    ),
+                                ) ?? dataArray[0]
                             updatedData.push({
                                 ...existingItem,
                                 ...dataCandidate,
@@ -943,12 +1019,17 @@ export class LineDb {
                     }
                 } else {
                     for (const item of dataArray) {
-                        const filterObject = 'id' in item ? { id: item.id } : item
-                        const existingItem = await adapter.readByFilter(filterObject, {
-                            strictCompare: true,
-                            inTransaction:
-                                this.#inTransaction || options.inTransaction,
-                        })
+                        const filterObject =
+                            'id' in item ? { id: item.id } : item
+                        const existingItem = await adapter.readByFilter(
+                            filterObject,
+                            {
+                                strictCompare: true,
+                                inTransaction:
+                                    this.#inTransaction ||
+                                    options.inTransaction,
+                            },
+                        )
                         if (existingItem.length > 0) {
                             for (const existing of existingItem) {
                                 updatedData.push({
@@ -1069,31 +1150,47 @@ export class LineDb {
     }
 
     async delete<T extends LineDbAdapter>(
-        data: Partial<T> | Partial<T>[],
+        data: Partial<T> | Partial<T>[] | string,
         collectionName?: string,
-        options: { inTransaction: boolean } = { inTransaction: false },
-    ): Promise<void> {
+        options: { inTransaction: boolean; strictCompare?: boolean } = {
+            inTransaction: false,
+            strictCompare: true,
+        },
+    ): Promise<Partial<LineDbAdapter>[]> {
         if (!collectionName) {
             collectionName = this.firstCollection
         }
-        const adapter = this.#adapters.get(collectionName) as JSONLFile<T>
-        if (!adapter) {
-            throw new Error(`Collection ${collectionName} not found`)
-        }
 
         const payload = async () => {
-            const dataArrayToDelete = Array.isArray(data) ? data : [data]
-            await adapter.delete(dataArrayToDelete, {
-                inTransaction: this.#inTransaction || options.inTransaction,
-            })
+            const filter =
+                typeof data === 'string'
+                    ? data
+                    : Array.isArray(data)
+                    ? data
+                    : [data]
+            const adapters = await this.getCollectionAdapters(collectionName)
+            const deletedRecords: Partial<LineDbAdapter>[] = []
+            for (const [key, adapter] of adapters.entries()) {
+                if (key.includes(collectionName)) {
+                    const deleted = await adapter.delete(filter, {
+                        ...options,
+                        inTransaction:
+                            this.#inTransaction || options.inTransaction,
+                    })
+                    deletedRecords.push(
+                        ...(deleted as Partial<LineDbAdapter>[]),
+                    )
+                }
+            }
 
             // Очищаем кэш для удаленных записей
-            for (const item of dataArrayToDelete) {
+            for (const item of deletedRecords) {
                 if (item.id) {
                     const cacheKey = `${collectionName}:${item.id}`
                     this.#cache.delete(cacheKey)
                 }
             }
+            return deletedRecords
         }
         if (this.#inTransaction || options.inTransaction) {
             return await payload()
@@ -1286,11 +1383,11 @@ export class LineDb {
             optimisticRead?: boolean
             returnChain?: boolean
         } = {
-                strictCompare: false,
-                inTransaction: false,
-                optimisticRead: false,
-                returnChain: false,
-            },
+            strictCompare: false,
+            inTransaction: false,
+            optimisticRead: false,
+            returnChain: false,
+        },
     ): Promise<CollectionChain<T> | T[]> {
         const results = await this.readByFilter<T>(
             data,
@@ -1346,59 +1443,59 @@ export class LineDb {
             leftData =
                 typeof leftCollection === 'string'
                     ? await this.readByFilter<T>(
-                        options.leftFilter,
-                        typeof leftCollection === 'string'
-                            ? leftCollection
-                            : undefined,
-                        {
-                            strictCompare: options.strictCompare,
-                            inTransaction: options.inTransaction,
-                        },
-                    )
+                          options.leftFilter,
+                          typeof leftCollection === 'string'
+                              ? leftCollection
+                              : undefined,
+                          {
+                              strictCompare: options.strictCompare,
+                              inTransaction: options.inTransaction,
+                          },
+                      )
                     : await this.#filterByData<T>(
-                        options.leftFilter,
-                        leftCollection,
-                        {
-                            strictCompare: options.strictCompare,
-                        },
-                    )
+                          options.leftFilter,
+                          leftCollection,
+                          {
+                              strictCompare: options.strictCompare,
+                          },
+                      )
         }
         if (options.rightFilter) {
             rightData =
                 typeof rightCollection === 'string'
                     ? await this.readByFilter<U>(
-                        options.rightFilter,
-                        typeof rightCollection === 'string'
-                            ? rightCollection
-                            : undefined,
-                        {
-                            strictCompare: options.strictCompare,
-                            inTransaction: options.inTransaction,
-                        },
-                    )
+                          options.rightFilter,
+                          typeof rightCollection === 'string'
+                              ? rightCollection
+                              : undefined,
+                          {
+                              strictCompare: options.strictCompare,
+                              inTransaction: options.inTransaction,
+                          },
+                      )
                     : await this.#filterByData<U>(
-                        options.rightFilter,
-                        rightCollection,
-                        {
-                            strictCompare: options.strictCompare,
-                        },
-                    )
+                          options.rightFilter,
+                          rightCollection,
+                          {
+                              strictCompare: options.strictCompare,
+                          },
+                      )
         }
 
         if (leftData.length === 0) {
             leftData = Array.isArray(leftCollection)
                 ? leftCollection
                 : await this.read<T>(leftCollection, {
-                    inTransaction: options.inTransaction as boolean,
-                })
+                      inTransaction: options.inTransaction as boolean,
+                  })
         }
 
         if (rightData.length === 0) {
             rightData = Array.isArray(rightCollection)
                 ? rightCollection
                 : await this.read<U>(rightCollection, {
-                    inTransaction: options.inTransaction as boolean,
-                })
+                      inTransaction: options.inTransaction as boolean,
+                  })
         }
 
         const result: { left: T; right: U | null }[] = []
@@ -1467,14 +1564,14 @@ export class LineDb {
     }
 
     /**
-     * Выполняет транзакцию с несколькими адаптерами одновременно.
+     * Performs a transaction with multiple adapters simultaneously.
      *
-     * @template T - Тип данных адаптера
-     * @param callback - Функция обратного вызова, которая будет выполнена в рамках транзакции
-     * @param adapters - Map адаптеров, с которыми будет выполнена транзакция
-     * @param lineDbTransactionOptions - Опции транзакции
-     * @param lineDbTransactionOptions.rollback - Флаг, указывающий нужно ли выполнять откат транзакции при ошибке (по умолчанию true)
-     * @param lineDbTransactionOptions.timeout - Таймаут транзакции в миллисекундах (по умолчанию 10000)
+     * @template T - Type of adapter data
+     * @param callback - Callback function that will be executed within the transaction
+     * @param adapters - Map of adapters with which the transaction will be performed
+     * @param lineDbTransactionOptions - Transaction options
+     * @param lineDbTransactionOptions.rollback - Flag indicating whether to perform a rollback transaction in case of an error (default true)
+     * @param lineDbTransactionOptions.timeout - Transaction timeout in milliseconds (default 10000)
      * @returns Promise<void>
      *
      * @example
@@ -1501,52 +1598,67 @@ export class LineDb {
             >,
             db: LineDb,
         ) => Promise<unknown>,
-        adapters: Map<string, JSONLFile<LineDbAdapter>>,
+        adapters: string[],
         lineDbTransactionOptions: LineDbTransactionOptions = { rollback: true },
     ): Promise<void> {
         const mutexLocal = this.#mutex || globalLineDbMutex
-        await mutexLocal.withWriteLock(async () => {
-            const adaptersMap = new Map<
-                string,
-                {
-                    adapter: JSONLFile<LineDbAdapter>
-                    adapterOptions: LineDbAdapterOptions
-                }
-            >()
-            for (const [collectionName, adapter] of adapters) {
-                const adapterTransactionId = await adapter.beginTransaction({
-                    rollback: !lineDbTransactionOptions.rollback,
-                    timeout: lineDbTransactionOptions.timeout || 10_000,
-                })
-                adaptersMap.set(collectionName, {
-                    adapter,
-                    adapterOptions: {
-                        inTransaction: true,
-                        transactionId: adapterTransactionId,
-                    },
-                })
+        const adapterMap = new Map<
+            string,
+            {
+                adapter: JSONLFile<LineDbAdapter>
+                adapterOptions: LineDbAdapterOptions
             }
+        >()
+
+        await mutexLocal.withWriteLock(async () => {
             const transactionBackupFile =
                 lineDbTransactionOptions.backupFile ||
                 path.join(
                     os.tmpdir(),
                     crypto.randomBytes(8).toString('hex') +
-                    '-linedb-backup.backup',
+                        '-linedb-backup.backup',
                 )
             try {
+                for (const collectionName of adapters) {
+                    // get existing adapters for this collection
+                    const existingAdapters =
+                        await this.getCollectionAdapters(collectionName)
+                    for (const [adapterKey, adapter] of existingAdapters) {
+                        // if adapter is not in adapterMap, begin transaction add it
+                        if (!adapterMap.has(adapterKey)) {
+                            const adapterTransactionId =
+                                await adapter.beginTransaction({
+                                    rollback:
+                                        !lineDbTransactionOptions.rollback,
+                                    timeout:
+                                        lineDbTransactionOptions.timeout ||
+                                        10_000,
+                                })
+                            adapterMap.set(adapterKey, {
+                                adapter,
+                                adapterOptions: {
+                                    inTransaction: true,
+                                    transactionId: adapterTransactionId,
+                                },
+                            })
+                        }
+                    }
+                }
+
                 if (lineDbTransactionOptions.rollback) {
                     await this.createBackup(transactionBackupFile, {
-                        collectionNames: Array.from(adaptersMap.keys()),
+                        collectionNames: Array.from(adapterMap.keys()),
+                        noLock: true, // we aleady locked db
                     })
                 }
-                await callback(adaptersMap, this)
+                await callback(adapterMap, this)
             } catch (error) {
                 if (lineDbTransactionOptions.rollback) {
                     await this.restoreFromBackup(transactionBackupFile)
                 }
                 throw error
             } finally {
-                for (const [, adapter] of adaptersMap) {
+                for (const [, adapter] of adapterMap) {
                     await adapter.adapter.endTransaction()
                 }
             }
@@ -1588,7 +1700,10 @@ export class LineDb {
             collectionNames?: string[]
             gzip?: boolean
             encryptKey?: string
-        } = {},
+            noLock?: boolean
+        } = {
+            noLock: false,
+        },
     ): Promise<void> {
         if (!outputFile) {
             const backupFolder = path.join(process.cwd(), 'linedb-backups')
@@ -1606,8 +1721,9 @@ export class LineDb {
             await fs.mkdir(path.dirname(outputFile), { recursive: true })
         }
 
-        const mutexLocal = this.#mutex
-        return await mutexLocal.withReadLock(async () => {
+        const mutexLocal = this.#mutex || globalLineDbMutex
+
+        const payload = async () => {
             const backupContent: string[] = []
 
             // Собираем данные из всех коллекций
@@ -1656,8 +1772,22 @@ export class LineDb {
                 backupContent.push('=====================')
             }
 
-            // Записываем в файл
-            let contentToWrite = backupContent.join('\n')
+            // Write backup data to file
+            const backupTimestamp = Date.now()
+
+            const metaData: BackupMetaData = {
+                collectionNames: options.collectionNames || [],
+                gzip: options.gzip || false,
+                encryptKey: options.encryptKey || '',
+                noLock: options.noLock || false,
+                timestamp: backupTimestamp,
+                backupDate: new Date(backupTimestamp).toISOString(),
+            }
+
+            let contentToWrite = `===metadata:${JSON.stringify(
+                metaData,
+            )}===\n${backupContent.join('\n')}`
+
             if (options.gzip) {
                 contentToWrite = await compressToBase64(contentToWrite)
             }
@@ -1673,7 +1803,12 @@ export class LineDb {
                 }
             }
             await fs.writeFile(outputFile as PathLike, contentToWrite, 'utf-8')
-        })
+        }
+        if (options.noLock) {
+            await payload()
+        } else {
+            await mutexLocal.withReadLock(payload)
+        }
     }
 
     async restoreFromBackup(
@@ -1683,15 +1818,28 @@ export class LineDb {
             encryptKey?: string
             gzip?: boolean
             keepBackup?: boolean
+            noLock?: boolean
         } = {
-                gzip: false,
-                encryptKey: '',
-                collectionNames: [],
-                keepBackup: false,
-            },
+            gzip: false,
+            encryptKey: '',
+            collectionNames: [],
+            keepBackup: false,
+            noLock: false,
+        },
     ): Promise<{ error: string } | void> {
-        const mutexLocal = this.#mutex
+        const mutexLocal = this.#mutex || globalLineDbMutex
+        // Считываем метаданные из первой строки файла бэкапа
+        let metaData: BackupMetaData = {
+            collectionNames: [],
+            gzip: false,
+            encryptKey: '',
+            noLock: false,
+            timestamp: 0,
+            backupDate: '',
+        }
+
         let content: string = await fs.readFile(backupFile, 'utf-8')
+
         if (options.encryptKey) {
             const decryptedContent = await this.#decrypt(
                 content,
@@ -1706,132 +1854,176 @@ export class LineDb {
         if (options.gzip) {
             content = await decompressFromBase64(content)
         }
+        const metaDataLineEnd = content.indexOf('\n')
+        if (metaDataLineEnd !== -1) {
+            const firstLine = content.substring(0, metaDataLineEnd)
+            const metaMatch = firstLine.match(/^===metadata:(.+)===/)
+            if (metaMatch) {
+                try {
+                    metaData = JSON.parse(metaMatch[1])
+                } catch (e) {
+                    throw new Error(`Error parsing metadata from backup: ${e}`)
+                }
+            }
+        }
+        // define payload for restoring data from backup file
+        const payload = async () => {
+            // read content of backup file
+            const lines = content.split('\n')
 
-        try {
-            await mutexLocal.withWriteLock(async () => {
-                // read content of backup file
-                const lines = content.split('\n')
-
-                let currentCollection: string | null = null
-                // let currentCollectionBaseName: string = ''
-                let currentFilename: string | null = null
-                let currentData: string[] = []
-
-                // process each line
-                for (const line of lines) {
-                    // Пропускаем разделители между коллекциями
-                    if (/^=+$/.test(line.trim())) {
+            let currentCollection: string | null = null
+            // let currentCollectionBaseName: string = ''
+            let currentFilename: string | null = null
+            let currentData: string[] = []
+            // Удаляем все файлы, начинающиеся с имен коллекций из метаданных
+            const dbDir = this.#initOptions?.dbFolder
+            if (dbDir) {
+                const processedCollections = new Set<string>()
+                for (const collectionName of metaData.collectionNames) {
+                    const baseCollectionName = collectionName.split('_')[0]
+                    if (processedCollections.has(baseCollectionName)) {
                         continue
                     }
-                    // check if line is a collection separator
-                    if (line.startsWith('===') && line.endsWith('===')) {
-                        // if we have data from previous collection, save it
+                    processedCollections.add(baseCollectionName)
+                    const files = await fs.readdir(dbDir)
+                    for (const file of files) {
                         if (
-                            currentCollection &&
-                            currentFilename &&
-                            currentData.length > 0
+                            file.startsWith(baseCollectionName) &&
+                            file.endsWith('.jsonl')
                         ) {
-                            // let adapter: JSONLFile<LineDbAdapter> | null = null
-
-                            // adapter = this.#adapters.get(
-                            //     currentCollection,
-                            // ) as JSONLFile<LineDbAdapter>
-                            // if (!adapter) {
-                            //     throw new Error(
-                            //         `Collection ${currentCollection} not found during restore`,
-                            //     )
-                            // }
-
-                            // Дополняем каждую строку пробелами до оптимального размера allocSize
-                            const maxLineLength = Math.max(
-                                ...currentData.map((line) => line.length),
-                            )
-
-                            const allocSize = nextPowerOf2(
-                                Math.max(maxLineLength + 1),
-                            )
-                            const paddedData = currentData
-                                .filter((line) => line.trim())
-                                .map((line) => {
-                                    const padding = ' '.repeat(
-                                        Math.max(
-                                            0,
-                                            allocSize - line.length - 1,
-                                        ),
-                                    )
-                                    return line + padding
-                                })
-                                .join('\n')
-
-                            // Записываем данные в файл
-                            await fs.writeFile(
-                                currentFilename,
-                                `${paddedData}\n`,
-                                'utf-8',
-                            )
-
-                            // Clear cache for this collection
-                            await this.clearCache(currentCollection)
-                            currentData = []
+                            try {
+                                await fs.unlink(path.join(dbDir, file))
+                            } catch (e) {
+                                // TODO: log error
+                            }
                         }
-
-                        // Извлекаем имя коллекции и файла
-                        const current = line.slice(3, -3)
-                        currentCollection = current.split(':')[0]
-                        currentFilename = current.split(':')[1]
-                        // currentCollectionBaseName = currentCollection.split('_')[0]
-                        continue
-                    }
-
-                    // Если у нас есть текущая коллекция, добавляем строку
-                    if (
-                        currentCollection &&
-                        ((options?.collectionNames || []).length === 0 ||
-                            (options?.collectionNames || []).some((v) =>
-                                (currentCollection || '').startsWith(v),
-                            ))
-                    ) {
-                        currentData.push(line)
                     }
                 }
+            }
+            // restore data from backup file
+            // process each line
+            for (const line of lines) {
+                // skip metadata line
+                if (line.match(/^===metadata:(.+)===/)) {
+                    continue
+                }
+                // skip collection separators
+                if (/^=+$/.test(line.trim())) {
+                    continue
+                }
 
-                // Сохраняем данные последней коллекции
+                // check if line is a collection separator
+                if (line.startsWith('===') && line.endsWith('===')) {
+                    // if we have data from previous collection, save it
+                    if (
+                        currentCollection &&
+                        currentFilename &&
+                        currentData.length > 0
+                    ) {
+                        // let adapter: JSONLFile<LineDbAdapter> | null = null
+
+                        // adapter = this.#adapters.get(
+                        //     currentCollection,
+                        // ) as JSONLFile<LineDbAdapter>
+                        // if (!adapter) {
+                        //     throw new Error(
+                        //         `Collection ${currentCollection} not found during restore`,
+                        //     )
+                        // }
+
+                        // Дополняем каждую строку пробелами до оптимального размера allocSize
+                        const maxLineLength = Math.max(
+                            ...currentData.map((line) => line.length),
+                        )
+
+                        const allocSize = nextPowerOf2(
+                            Math.max(maxLineLength + 1),
+                        )
+                        const paddedData = currentData
+                            .filter((line) => line.trim())
+                            .map((line) => {
+                                const padding = ' '.repeat(
+                                    Math.max(0, allocSize - line.length - 1),
+                                )
+                                return line + padding
+                            })
+                            .join('\n')
+
+                        // Записываем данные в файл
+                        await fs.writeFile(
+                            currentFilename,
+                            `${paddedData}\n`,
+                            'utf-8',
+                        )
+
+                        // Clear cache for this collection
+                        await this.clearCache(currentCollection)
+                        currentData = []
+                    }
+
+                    // Извлекаем имя коллекции и файла
+                    const current = line.slice(3, -3)
+                    currentCollection = current.split(':')[0]
+                    currentFilename = current.split(':')[1]
+                    // currentCollectionBaseName = currentCollection.split('_')[0]
+                    continue
+                }
+
+                // Если у нас есть текущая коллекция, добавляем строку
                 if (
+                    currentCollection &&
+                    ((options?.collectionNames || []).length === 0 ||
+                        (options?.collectionNames || []).some((v) =>
+                            (currentCollection || '').startsWith(v),
+                        ))
+                ) {
+                    currentData.push(line)
+                }
+            }
+
+            // Сохраняем данные последней коллекции
+            if (
+                !(
                     currentCollection &&
                     currentFilename &&
                     currentData.length > 0
-                ) {
-                    // Дополняем каждую строку пробелами до оптимального размера allocSize
-                    const maxLineLength = Math.max(
-                        ...currentData.map((line) => line.length),
+                )
+            ) {
+                return
+            }
+            // Дополняем каждую строку пробелами до оптимального размера allocSize
+            const maxLineLength = Math.max(
+                ...currentData.map((line) => line.length),
+            )
+            const allocSize = nextPowerOf2(Math.max(maxLineLength + 1))
+
+            // Дополняем каждую строку пробелами до размера allocSize
+            const paddedData = currentData
+                .filter((line) => line.trim())
+                .map((line) => {
+                    const padding = ' '.repeat(
+                        Math.max(0, allocSize - line.length - 1),
                     )
-                    const allocSize = nextPowerOf2(Math.max(maxLineLength + 1))
+                    return line + padding
+                })
+                .join('\n')
 
-                    // Дополняем каждую строку пробелами до размера allocSize
-                    const paddedData = currentData
-                        .filter((line) => line.trim())
-                        .map((line) => {
-                            const padding = ' '.repeat(
-                                Math.max(0, allocSize - line.length - 1),
-                            )
-                            return line + padding
-                        })
-                        .join('\n')
+            // Записываем данные в файл
+            await fs.writeFile(currentFilename, `${paddedData}\n`, 'utf-8')
 
-                    // Записываем данные в файл
-                    await fs.writeFile(
-                        currentFilename,
-                        `${paddedData}\n`,
-                        'utf-8',
-                    )
+            // Переинициализируем адаптер
+            // await adapter.init(true)
 
-                    // Переинициализируем адаптер
-                    // await adapter.init(true)
-
-                    // Очищаем кэш для этой коллекции
-                    await this.clearCache(currentCollection)
-                }
-            })
+            // Очищаем кэш для этой коллекции
+            await this.clearCache(currentCollection)
+        }
+        // execute payload
+        try {
+            if (options.noLock) {
+                await payload()
+            } else {
+                await mutexLocal.withWriteLock(payload)
+            }
             await this.init(true, this.#initOptions)
             if (!options.keepBackup) {
                 await fs.unlink(backupFile)
@@ -1839,10 +2031,27 @@ export class LineDb {
         } catch (error) {
             // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
             return {
-                error: `Error restoring from backup: ${(error as Error).message
-                    }`,
+                error: `Error restoring from backup: ${
+                    (error as Error).message
+                }`,
             }
         }
+    }
+
+    async getCollectionAdapters<T extends LineDbAdapter>(
+        collectionName?: string,
+    ): Promise<Map<string, JSONLFile<T>>> {
+        if (!collectionName) {
+            collectionName = this.firstCollection
+        }
+
+        const adapters = new Map<string, JSONLFile<T>>()
+        for (const [partitionKey, adapter] of this.#adapters) {
+            if (partitionKey.startsWith(collectionName)) {
+                adapters.set(partitionKey, adapter as JSONLFile<T>)
+            }
+        }
+        return adapters
     }
 
     async getPartitionAdapter<T extends LineDbAdapter>(
