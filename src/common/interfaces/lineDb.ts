@@ -1,14 +1,9 @@
 import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 
 import { JSONLFileOptions, LineDbAdapter } from './jsonl-file.js'
+import { RecordCache } from './cache.js'
 
 export { LineDbAdapter } from './jsonl-file.js'
-
-export interface CacheEntry<T> {
-    data: T
-    lastAccess: number // время последнего доступа
-    collectionName: string // имя коллекции
-}
 
 export interface PartitionCollection<P> {
     collectionName: string
@@ -23,6 +18,7 @@ export interface nextIdCollection<P> {
 export interface LineDbInitOptions {
     cacheSize?: number
     cacheTTL?: number // время жизни записи в кэше (мс)
+    cache?: RecordCache<unknown>
     mutex?: RWMutex
     collections: JSONLFileOptions<unknown>[]
     dbFolder?: string
@@ -36,6 +32,7 @@ export interface LineDbInitOptions {
 export interface LineDbOptions {
     cacheSize?: number
     cacheTTL?: number // время жизни записи в кэше (мс)
+    cache?: RecordCache<unknown>
     mutex?: RWMutex
     nextIdFn?: (
         data: Partial<unknown>,
@@ -58,6 +55,7 @@ export interface JoinOptions<T extends LineDbAdapter, U extends LineDbAdapter> {
     rightFields: string[]
     strictCompare?: boolean
     inTransaction?: boolean
+    transactionId?: string
     leftFilter?: Partial<T>
     rightFilter?: Partial<U>
     onlyOneFromRight?: boolean

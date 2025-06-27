@@ -445,10 +445,10 @@ describe('LineDb - Инициализация из YAML файла', () => {
             await db.insert(order, 'orders')
             await db.insert(product, 'products')
 
-            // Создаем Map адаптеров для транзакции
+            // Create Map of adapters for transaction
             const adapters = ['users', 'orders', 'products']
 
-            // Выполняем транзакцию
+            // Execute transaction
             await db.withMultyAdaptersTransaction(
                 async (adapterMap, dbInstance) => {
                     // Записываем данные в разные коллекции

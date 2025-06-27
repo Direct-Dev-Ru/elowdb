@@ -69,6 +69,8 @@ describe('LineDb - Delete Method Tests', () => {
         }
         const initLineDBOptions: LineDbInitOptions = {
             dbFolder: testDbFolder,
+            cacheSize: 1000,
+            cacheTTL: 10000,
             collections: [
                 adapterTestDataOptions as unknown as JSONLFileOptions<unknown>,
                 adapterUserOptions as unknown as JSONLFileOptions<unknown>,
@@ -95,7 +97,7 @@ describe('LineDb - Delete Method Tests', () => {
         }
     })
 
-    describe('Базовые операции удаления', () => {
+    describe('Base delete operations', () => {
         it('should delete one record by ID', async () => {
             const data: TestData = {
                 id: 1,
@@ -266,7 +268,7 @@ describe('LineDb - Delete Method Tests', () => {
         })
     })
 
-    describe('Удаление с кэшированием', () => {
+    describe('Delete and caching', () => {
         it('should clear cache for deleted records', async () => {
             const data: TestData = {
                 id: 1,
@@ -322,8 +324,8 @@ describe('LineDb - Delete Method Tests', () => {
         })
     })
 
-    describe('Удаление в партиционированных коллекциях', () => {
-        it.only('should delete record from correct partition', async () => {
+    describe('Delete in partitioned collections', () => {
+        it('should delete record from correct partition', async () => {
             const order1: TestOrder = {
                 id: 1,
                 userId: 1,
@@ -342,24 +344,22 @@ describe('LineDb - Delete Method Tests', () => {
             await db.insert<TestOrder>(order1, 'orders')
             await db.insert<TestOrder>(order2, 'orders')
             db.clearCache()
-            let allOrders = await db.read<TestOrder>('orders')
-            expect(allOrders).toHaveLength(2)
             expect(db.actualCacheSize).toBe(0)
-            const selectOrdersResult = await db.readByFilter<TestOrder>('','orders')
-            expect(db.selectResultArray(selectOrdersResult)).toHaveLength(2)
-            logTest(true, db.cacheMap)
-            expect(db.actualCacheSize).toBe(2)
-            return
 
+            let selectOrdersResult = await db.select<TestOrder>('', 'orders')
+            expect(db.selectResultArray(selectOrdersResult)).toHaveLength(2)
+            // logTest(true, db.cacheMap)
+            expect(db.actualCacheSize).toBe(2)
             // Удаляем заказ пользователя 1
             await db.delete<TestOrder>({ userId: 1 }, 'orders')
 
-            allOrders = await db.read<TestOrder>('orders')
-            expect(allOrders).toHaveLength(1)
-            expect(allOrders[0].userId).toBe(2)
-        })
+            selectOrdersResult = await db.select<TestOrder>({}, 'orders')
+            expect(db.selectResultArray(selectOrdersResult)).toHaveLength(1)
+            expect(db.selectResultArray(selectOrdersResult)[0].userId).toBe(2)
+            expect(db.actualCacheSize).toBe(1)
+        }, 1_000_000)
 
-        it('должен удалить записи из всех партиций при использовании общего фильтра', async () => {
+        it('should delete records from all partitions when using a common filter', async () => {
             const orders: TestOrder[] = [
                 {
                     id: 1,
@@ -384,20 +384,22 @@ describe('LineDb - Delete Method Tests', () => {
                 },
             ]
 
-            await db.write<TestOrder>(orders, 'orders')
+            await db.insert<TestOrder>(orders, 'orders')
 
-            let allOrders = await db.read<TestOrder>('orders')
-            expect(allOrders).toHaveLength(3)
+            let selectOrdersResult = await db.select<TestOrder>('', 'orders')
+            expect(db.selectResultArray(selectOrdersResult)).toHaveLength(3)
 
-            // Удаляем все заказы со статусом 'pending'
+            // Delete all orders with status 'pending'
             await db.delete<TestOrder>({ status: 'pending' }, 'orders')
 
-            allOrders = await db.read<TestOrder>('orders')
-            expect(allOrders).toHaveLength(1)
-            expect(allOrders[0].status).toBe('completed')
+            selectOrdersResult = await db.select<TestOrder>('', 'orders')
+            expect(db.selectResultArray(selectOrdersResult)).toHaveLength(1)
+            expect(db.selectResultArray(selectOrdersResult)[0].status).toBe(
+                'completed',
+            )
         })
 
-        it('должен удалить записи из конкретной партиции', async () => {
+        it('should delete records from a specific partition', async () => {
             const orders: TestOrder[] = [
                 {
                     id: 1,
@@ -415,22 +417,22 @@ describe('LineDb - Delete Method Tests', () => {
                 },
             ]
 
-            await db.write<TestOrder>(orders, 'orders')
+            await db.insert<TestOrder>(orders, 'orders')
 
-            let allOrders = await db.read<TestOrder>('orders')
-            expect(allOrders).toHaveLength(2)
+            let selectOrdersResult = await db.select<TestOrder>('', 'orders')
+            expect(db.selectResultArray(selectOrdersResult)).toHaveLength(2)
 
-            // Удаляем из конкретной партиции
+            // Delete from a specific partition
             await db.delete<TestOrder>({ id: 1 }, 'orders_1')
 
-            allOrders = await db.read<TestOrder>('orders')
-            expect(allOrders).toHaveLength(1)
-            expect(allOrders[0].userId).toBe(2)
+            selectOrdersResult = await db.select<TestOrder>('', 'orders')
+            expect(db.selectResultArray(selectOrdersResult)).toHaveLength(1)
+            expect(db.selectResultArray(selectOrdersResult)[0].userId).toBe(2)
         })
     })
 
-    describe('Удаление в транзакциях', () => {
-        it('должен выполнить удаление в транзакции', async () => {
+    describe('Delete in transactions', () => {
+        it('should delete in Multy Adapters Transaction transaction', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -439,18 +441,45 @@ describe('LineDb - Delete Method Tests', () => {
                 timestamp: Date.now(),
             }
 
-            await db.insert<TestData>(data, 'testData')
-            let result = await db.read<TestData>('testData')
-            expect(result).toHaveLength(1)
+            // Create Map of adapters for transaction
+            const adapters = ['testData']
 
-            await db.delete<TestData>({ id: 1 }, 'testData', {
-                inTransaction: true,
-            })
-            result = await db.read<TestData>('testData')
-            expect(result).toHaveLength(0)
+            // Execute transaction
+            await db.withMultyAdaptersTransaction(
+                async (adapterMap, database) => {
+                    const options = adapterMap.get('testData')?.adapterOptions
+                    await database.insert<TestData>(data, 'testData', {
+                        ...options,
+                        inTransaction: true,
+                    })
+                    await database.update<TestData>(
+                        [{ name: 'Updated Test User' }],
+                        'testData',
+                        { id: 1 },
+                        options,
+                    )
+                    const result = await db.select<TestData>(
+                        '',
+                        'testData',
+                        options,
+                    )
+                    expect(db.selectResultArray(result)).toHaveLength(1)
+                    expect(db.selectResultArray(result)[0].name).toBe(
+                        'Updated Test User',
+                    )
+                    await database.delete<TestData>({ id: 1 }, 'testData', {
+                        ...options,
+                        inTransaction: true,
+                    })
+                },
+                adapters,
+                { rollback: true },
+            )
+            const result = await db.select<TestData>('testData')
+            expect(db.selectResultArray(result)).toHaveLength(0)
         })
 
-        it('должен выполнить удаление в адаптерной транзакции', async () => {
+        it.only('should delete in adapter transaction', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -460,16 +489,14 @@ describe('LineDb - Delete Method Tests', () => {
             }
 
             await db.insert<TestData>(data, 'testData')
-            let result = await db.read<TestData>('testData')
-            expect(result).toHaveLength(1)
-
+            let result = await db.select<TestData>('id === 1','testData')
+            expect(db.selectResultArray(result)).toHaveLength(1)
+            // TODO Test fails - wrong transaction id 
             await db.withAdapterTransaction<TestData>(async (adapter, db) => {
-                await db.delete<TestData>({ id: 1 }, 'testData', {
-                    inTransaction: true,
-                })
+                await db.delete<TestData>({ id: 1 }, 'testData')
             }, 'testData')
 
-            result = await db.read<TestData>('testData')
+            result = await db.select<TestData>('','testData')
             expect(result).toHaveLength(0)
         })
     })

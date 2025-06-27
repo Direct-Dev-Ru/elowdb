@@ -11,6 +11,16 @@ export const compareIds = (
     return item.id !== record.id
 }
 
+/**
+ * Сравнивает два идентификатора (id), приводя их к числовому типу, если это возможно.
+ * Если оба id могут быть приведены к числу, сравнивает их как числа.
+ * Если оба id являются строками, сравнивает их как строки после удаления пробелов.
+ * В остальных случаях выполняет сравнение по типу и значению.
+ *
+ * @param {string | number | undefined} id1 - Первый идентификатор для сравнения.
+ * @param {string | number | undefined} id2 - Второй идентификатор для сравнения.
+ * @returns {boolean} true, если идентификаторы равны с учетом приведений типов, иначе false.
+ */
 export const compareIdsLikeNumbers = (
     id1: string | number | undefined,
     id2: string | number | undefined,
@@ -20,7 +30,6 @@ export const compareIdsLikeNumbers = (
     }
     const id1Num = Number(id1)
     const id2Num = Number(id2)
-
 
     const bothAreNumberCastable = !isNaN(id1Num) && !isNaN(id2Num)
     if (bothAreNumberCastable) {
@@ -33,10 +42,10 @@ export const compareIdsLikeNumbers = (
     }
 
     if (typeof id1 === 'string' && typeof id2 === 'number') {
-        return id1 !== id2.toString()
+        return id1 === id2.toString()
     }
     if (typeof id1 === 'number' && typeof id2 === 'string') {
-        return id1 !== Number(id2)
+        return id1.toString() === id2
     }
     return false
 }
