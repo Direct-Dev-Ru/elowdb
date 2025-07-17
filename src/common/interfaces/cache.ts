@@ -11,7 +11,7 @@ export interface Cache<T> {
 }
 
 export interface CacheEntry<T> {
-    data: T
+    data: T | T[]
     lastAccess: number // время последнего доступа
     collectionName: string // имя коллекции
 }
@@ -26,14 +26,14 @@ export interface RecordCache<T> {
      * @param key - ключ записи в формате "collectionName:id"
      * @returns запись из кэша или null, если не найдена или устарела
      */
-    get(key: string): T | null
+    get(key: string): T | T[] | null
 
     /**
      * Получить запись из кэша по данным записи
      * @param data - данные записи
      * @returns запись из кэша или null, если не найдена или устарела
      */
-    getByRecord(data: Partial<T>, collectionName?: string): T | null
+    getByRecord(data: Partial<T>, collectionName?: string): T | T[] | null
 
     /**
      * Установить запись в кэш
@@ -118,7 +118,7 @@ export interface RecordCache<T> {
      * @param collectionName - имя коллекции
      * @returns массив записей коллекции
      */
-    getCollectionEntries(collectionName: string): T[]
+    getCollectionEntries(collectionName: string): (T | T[])[]
 
     /**
      * Получить информацию о всех коллекциях
@@ -131,4 +131,11 @@ export interface RecordCache<T> {
      * @returns Map<string | number, CacheEntry<T>>
      */
     getFlatCacheMap(): Map<string | number, CacheEntry<T>>
+
+    /**
+     * Обновить кэш после записи новых данных
+     * @param data - данные записи
+     * @param collectionName - имя коллекции
+     */
+    updateCacheAfterInsert(data: T, collectionName: string): Promise<void>
 }

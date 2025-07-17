@@ -1,3 +1,80 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export const filtrexFunctionNames = [
+    'strLen',
+    'strCmp',
+    'strConcat',
+    'strSplit',
+    'strJoin',
+    'strReplace',
+    'strToLower',
+    'strToUpper',
+    'strTrim',
+    'strPad',
+    'strPadRight',
+    'strRepeat',
+    'strSlice',
+    'strSubstring',
+    'strStartsWith',
+    'strEndsWith',
+    'strContains',
+    'strIndexOf',
+    'getFullYear',
+    'getMonth',
+    'getDay',
+    'getHours',
+    'getMinutes',
+    'getSeconds',
+    'getMilliseconds',
+    'getTime',
+    'formatDate',
+    'isNumber',
+    'isInteger',
+    'isString',
+    'isBoolean',
+    'isArray',
+    'isObject',
+    'isNull',
+    'isNotNull',
+    'isUndefined',
+    'isNotUndefined',
+    'round',
+    'abs',
+    'min',
+    'max',
+    'inRange',
+    'arrLen',
+    'arrIncludes',
+    'arrIndexOf',
+    'arrFirst',
+    'arrLast',
+    'arrConcat',
+    'arrFilter',
+    'arrMap',
+    'arrSome',
+    'arrEvery',
+    'arrFind',
+    'arrFindIndex',
+    'arrSort',
+    'arrReverse',
+    'arrSlice',
+    'arrUnique',
+    'arrJoin',
+    'mapFromEntries',
+    'mapGet',
+    'mapHas',
+    'mapKeys',
+    'mapValues',
+    'mapEntries',
+    'mapSize',
+    'setFromValues',
+    'setHas',
+    'setValues',
+    'setSize',
+    'setUnion',
+    'setIntersection',
+    'setDifference',
+]
+
 /**
  * Получает длину строки
  * @param s - Входная строка
@@ -179,7 +256,6 @@ function strIndexOf(s: string, substring: string): number {
     return s.indexOf(substring)
 }
 
-
 /**
  * Получает год из временной метки
  * @param timestamp - Временная метка в миллисекундах
@@ -316,12 +392,30 @@ function isNull(value: any): boolean {
 }
 
 /**
+ * Проверяет, является ли значение не null
+ * @param value - Проверяемое значение
+ * @returns true если значение является null
+ */
+function isNotNull(value: any): boolean {
+    return !isNull(value)
+}
+
+/**
  * Проверяет, является ли значение undefined
  * @param value - Проверяемое значение
  * @returns true если значение является undefined
  */
 function isUndefined(value: any): boolean {
     return value === undefined
+}
+
+/**
+ * Проверяет, является ли значение undefined
+ * @param value - Проверяемое значение
+ * @returns true если значение является undefined
+ */
+function isNotUndefined(value: any): boolean {
+    return value !== undefined
 }
 
 /**
@@ -681,7 +775,7 @@ function setUnion<T>(set1: Set<T>, set2: Set<T>): Set<T> {
  * @returns Новый Set, содержащий общие элементы
  */
 function setIntersection<T>(set1: Set<T>, set2: Set<T>): Set<T> {
-    return new Set([...set1].filter(x => set2.has(x)))
+    return new Set([...set1].filter((x) => set2.has(x)))
 }
 
 /**
@@ -691,7 +785,7 @@ function setIntersection<T>(set1: Set<T>, set2: Set<T>): Set<T> {
  * @returns Новый Set, содержащий элементы из set1, которых нет в set2
  */
 function setDifference<T>(set1: Set<T>, set2: Set<T>): Set<T> {
-    return new Set([...set1].filter(x => !set2.has(x)))
+    return new Set([...set1].filter((x) => !set2.has(x)))
 }
 
 export const filtrexFunctions = {
@@ -734,7 +828,9 @@ export const filtrexFunctions = {
     isArray,
     isObject,
     isNull,
+    isNotNull,
     isUndefined,
+    isNotUndefined,
 
     // Математические функции
     round,

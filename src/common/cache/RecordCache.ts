@@ -3,16 +3,45 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { createHash } from 'crypto'
+import { decode } from 'punycode'
 
 import { RecordCache } from '../interfaces/cache.js'
 import { CacheEntry } from '../interfaces/cache.js'
+import { defaultFilterData } from '../utils/filterParser.js'
+import { createSafeFilter } from '../utils/filtrex.js'
 import { logTest } from '../utils/log.js'
+import { decompressFromBase64 } from '../utils/strings.js'
 
 export interface RecordCacheOptions {
     maxSize?: number
     ttl?: number
     enableLogging?: boolean
     keyFn?: (item: unknown) => string | number // функция для генерации ключа записи
+}
+
+export const compareIdForCache = (
+    item: { id: string | number },
+    record: { id: string | number },
+) => {
+    if (typeof item.id === 'string' && typeof record.id === 'string') {
+        return item.id !== record.id
+    }
+    const id1Num = Number(item.id)
+    const id2Num = Number(record.id)
+
+    const bothAreNumberCastable = !isNaN(id1Num) && !isNaN(id2Num)
+    if (bothAreNumberCastable) {
+        return id1Num === id2Num
+    }
+
+    if (typeof item.id === 'string' && typeof record.id === 'number') {
+        return item.id === record.id.toString()
+    }
+    if (typeof item.id === 'number' && typeof record.id === 'string') {
+        return item.id.toString() === record.id
+    }
+
+    return item.id !== record.id
 }
 
 /**
@@ -96,7 +125,7 @@ export class MemoryRecordCache<T> implements RecordCache<T> {
         return this.keyFn(item)
     }
 
-    getByRecord(data: Partial<T>, collectionName?: string): T | null {
+    getByRecord(data: Partial<T>, collectionName?: string): T | T[] | null {
         const key = this.getRecordKey(data)
         return this.get(`${collectionName}:${key}`)
     }
@@ -105,7 +134,7 @@ export class MemoryRecordCache<T> implements RecordCache<T> {
      * Получить запись из кэша по ключу
      * @param key - ключ записи в формате "collectionName:id"
      */
-    get(key: string): T | null {
+    get(key: string): T | T[] | null {
         const [collectionName, recordKey] = this.parseKey(key)
         const baseCollectionName = this.getBaseCollectionName(collectionName)
 
@@ -143,6 +172,23 @@ export class MemoryRecordCache<T> implements RecordCache<T> {
     }
 
     setByRecord(data: T, collectionName?: string): boolean {
+        for (const [key, entry] of this.collections.entries()) {
+            if (key.startsWith(`pagination:${collectionName}`)) {
+                for (const [, innerEntry] of entry.entries()) {
+                    const paginatedResult = innerEntry.data as T[]
+                    const index = paginatedResult.findIndex((item) =>
+                        compareIdForCache(
+                            item as unknown as { id: string | number },
+                            data as unknown as { id: string | number },
+                        ),
+                    )
+                    if (index !== -1) {
+                        paginatedResult[index] = data
+                        innerEntry.data = paginatedResult
+                    }
+                }
+            }
+        }
         const key = this.getRecordKey(data)
         return this.set(`${collectionName}:${key}`, data)
     }
@@ -241,6 +287,23 @@ export class MemoryRecordCache<T> implements RecordCache<T> {
             // Удаляем пустую коллекцию
             if (collectionMap.size === 0) {
                 this.collections.delete(baseCollectionName)
+            }
+        }
+        for (const [key, entry] of this.collections.entries()) {
+            if (key.startsWith(`pagination:${collectionName}`)) {
+                for (const [, innerEntry] of entry.entries()) {
+                    const paginatedResult = innerEntry.data as T[]
+                    const index = paginatedResult.findIndex((item) =>
+                        compareIdForCache(
+                            item as unknown as { id: string | number },
+                            { id: recordKey },
+                        ),
+                    )
+                    if (index !== -1) {
+                        paginatedResult.splice(index, 1)
+                        innerEntry.data = paginatedResult
+                    }
+                }
             }
         }
     }
@@ -356,7 +419,7 @@ export class MemoryRecordCache<T> implements RecordCache<T> {
     /**
      * Получить все записи коллекции
      */
-    getCollectionEntries(collectionName: string): T[] {
+    getCollectionEntries(collectionName: string): (T | T[])[] {
         const baseCollectionName = this.getBaseCollectionName(collectionName)
         const collectionMap = this.collections.get(baseCollectionName)
         if (!collectionMap) {
@@ -364,7 +427,7 @@ export class MemoryRecordCache<T> implements RecordCache<T> {
         }
 
         const now = Date.now()
-        const entries: T[] = []
+        const entries: (T | T[])[] = []
 
         for (const [recordKey, entry] of collectionMap.entries()) {
             // Проверяем TTL
@@ -489,6 +552,74 @@ export class MemoryRecordCache<T> implements RecordCache<T> {
     private log(...args: unknown[]): void {
         if (this.enableLogging) {
             logTest(true, ...args)
+        }
+    }
+
+    async updateCacheAfterInsert(
+        data: T,
+        collectionName: string,
+    ): Promise<void> {
+        for (const [key, entry] of this.collections.entries()) {
+            if (key.startsWith(`pagination:${collectionName}`)) {
+                let delEntry = false
+                let innerKeyToDelete: string | number | undefined = undefined
+                for (const [innerKey, innerEntry] of entry.entries()) {
+                    try {
+                        const decodedFilter = (
+                            await decompressFromBase64(innerKey as string)
+                        ).trim()
+                        const filter: string | Partial<T> =
+                            decodedFilter.startsWith('{') &&
+                            decodedFilter.endsWith('}')
+                                ? JSON.parse(decodedFilter)
+                                : decodedFilter
+
+                        // this.log(
+                        //     'updateCacheAfterInsert',
+                        //     filter,
+                        //     data,
+                        //     innerEntry,
+                        // )
+                        let isMatch = false
+                        if (typeof filter !== 'string') {
+                            const objectFilterFunction =
+                                defaultFilterData(filter)
+                            isMatch = objectFilterFunction(data)
+                            // this.log('isMatch', isMatch)
+                        } else {
+                            const safeFilter = createSafeFilter(filter)
+                            isMatch = safeFilter(data)
+                        }
+                        if (isMatch) {
+                            const paginatedResult = innerEntry.data as T[]
+                            const index = paginatedResult.findIndex((item) =>
+                                compareIdForCache(
+                                    item as unknown as { id: string | number },
+                                    data as unknown as { id: string | number },
+                                ),
+                            )
+                            if (index === -1) {
+                                paginatedResult.push(data)
+                                innerEntry.data = paginatedResult
+                            } else {
+                                delEntry = true
+                                innerKeyToDelete = innerKey
+                            }
+                        }
+                    } catch (error) {
+                        console.error(
+                            'Error updating cache after insert',
+                            error,
+                        )
+                        delEntry = true
+                        innerKeyToDelete = innerKey
+                    }
+                }
+                // it is better to delete cached result to keep consistent cache
+                if (delEntry) {
+                    entry.delete(innerKeyToDelete as string | number)
+                }
+            }
         }
     }
 }

@@ -115,7 +115,16 @@ export class FilePositions {
     ): Promise<void> {
         // Проходим по всем записям в карте
         for (const [currentId, positions] of this.positions.entries()) {
-            const index = positions.indexOf(oldPosition)
+            // const index = positions.indexOf(oldPosition)
+            const index = positions.findIndex((p) => {
+                if (p instanceof FilePosition) {
+                    if (oldPosition instanceof FilePosition) {
+                        return p.position === oldPosition.position
+                    }
+                    return p.position === oldPosition
+                }
+                return p === (oldPosition as number)
+            })
             if (index !== -1) {
                 positions[index] = newPosition
                 this.positions.set(currentId, positions)
@@ -198,6 +207,15 @@ export class FilePositions {
         }, timeoutMs)
     }
 
+    async getPositionsByArrayOfData<T extends { id: string | number }>(
+        data: T[],
+        idFn?: (data: T) => (string | number)[],
+    ): Promise<Map<string | number, (number | FilePosition)[]>> {
+        return await this.mutex.withReadLock(async () => {
+            return this.getPositionsByArrayOfDataNoLock(data, idFn)
+        })
+    }
+
     async getPositionsByArrayOfDataNoLock<T extends { id: string | number }>(
         data: T[],
         idFn?: (data: T) => (string | number)[],
@@ -211,7 +229,52 @@ export class FilePositions {
                     const resId = id.toString().includes(':')
                         ? id.toString().split(':')[1]
                         : id
-                    result.set(resId, positions)
+
+                    const filteredPositions = positions.filter((p) => {
+                        if (p instanceof FilePosition) {
+                            return p.position >= 0
+                        }
+                        return p >= 0
+                    })
+                    if (filteredPositions.length > 0) {
+                        result.set(resId, filteredPositions)
+                    }
+                }
+            }
+        }
+        return result
+    }
+    async getNumberPositionsByArrayNoLock<T extends { id: string | number }>(
+        data: T[],
+        idFn?: (data: T) => (string | number)[],
+    ): Promise<Map<string | number, number[]>> {
+        const result = new Map<string | number, number[]>()
+        for (const item of data) {
+            const ids = idFn ? idFn(item) : [`byId:${item.id}`]
+            for (const id of ids) {
+                const positions = this.positions.get(id)
+                if (positions) {
+                    const resId = id.toString().includes(':')
+                        ? id.toString().split(':')[1]
+                        : id
+                    const filteredPositions = positions.filter((p) => {
+                        if (p instanceof FilePosition) {
+                            return p.position >= 0
+                        }
+                        return p >= 0
+                    })
+
+                    if (filteredPositions.length > 0) {
+                        result.set(
+                            resId,
+                            filteredPositions.map((p) => {
+                                if (p instanceof FilePosition) {
+                                    return p.position
+                                }
+                                return p
+                            }),
+                        )
+                    }
                 }
             }
         }
@@ -328,6 +391,8 @@ export class LinePositionsManager {
     private static filePositions: Map<string, FilePositions> = new Map()
 
     private constructor() {}
+
+    static deletedPosition: FilePosition = new FilePosition(-100, true)
 
     static async getFilePositions(filename: string): Promise<FilePositions> {
         return await this.globalMutex.withReadLock(async () => {

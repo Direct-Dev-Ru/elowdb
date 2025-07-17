@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable no-control-regex */
 import { compileExpression } from 'filtrex'
 
-import filtrexFunctions from './filtrexFunctions'
+import filtrexFunctions, { filtrexFunctionNames } from './filtrexFunctions'
 // Тип для конфигурации фильтра
 interface FilterConfig<T> {
     allowedFields?: Array<keyof T>
@@ -48,12 +49,61 @@ function normalizeExpression(expression: string): string {
  */
 function decodeBase64(str: string): string | null {
     try {
+        // Сначала проверяем, является ли строка валидной base64
+        if (!isValidBase64(str)) {
+            return null
+        }
         // Убираем возможные префиксы
         const cleanStr = str.replace(/^data:text\/javascript;base64,/, '')
         return atob(cleanStr)
     } catch {
         return null
     }
+}
+
+/**
+ * Проверяет, является ли строка валидной base64
+ * @param str Строка для проверки
+ * @returns true если строка является валидной base64
+ */
+function isValidBase64(str: string): boolean {
+    // Убираем возможные префиксы
+    const cleanStr = str.replace(/^data:text\/javascript;base64,/, '').trim()
+    // Проверяем длину (base64 должна быть кратной 4)
+    if (cleanStr.length % 4 !== 0) {
+        return false
+    }
+
+    // Проверяем, что строка содержит только допустимые символы base64
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/
+    if (!base64Regex.test(cleanStr)) {
+        return false
+    }
+
+    if (
+        safeFunctions.some(
+            (safeFunc) => cleanStr.toLowerCase() === safeFunc.toLowerCase(),
+        )
+    ) {
+        return true
+    }
+
+    // Проверяем, что padding символы (=) находятся только в конце
+    const paddingIndex = cleanStr.indexOf('=')
+    if (
+        paddingIndex !== -1 &&
+        paddingIndex !== cleanStr.length - 1 &&
+        paddingIndex !== cleanStr.length - 2
+    ) {
+        return false
+    }
+
+    // Проверяем, что если есть padding, то он корректный
+    if (cleanStr.endsWith('===')) {
+        return false // base64 не может иметь 3 символа padding
+    }
+
+    return true
 }
 
 /**
@@ -91,88 +141,7 @@ function containsBase64JavaScript(
 /**
  * Список безопасных функций из filtrexFunctions
  */
-const safeFunctions = [
-    // Строковые функции
-    'strLen',
-    'strCmp',
-    'strConcat',
-    'strSplit',
-    'strJoin',
-    'strReplace',
-    'strToLower',
-    'strToUpper',
-    'strTrim',
-    'strPad',
-    'strPadRight',
-    'strRepeat',
-    'strSlice',
-    'strSubstring',
-
-    // Функции для работы с датами
-    'getFullYear',
-    'getMonth',
-    'getDay',
-    'getHours',
-    'getMinutes',
-    'getSeconds',
-    'getMilliseconds',
-    'getTime',
-    'formatDate',
-
-    // Функции для проверки типов
-    'isNumber',
-    'isInteger',
-    'isString',
-    'isBoolean',
-    'isArray',
-    'isObject',
-    'isNull',
-    'isUndefined',
-
-    // Математические функции
-    'round',
-    'abs',
-    'min',
-    'max',
-    'inRange',
-
-    // Функции для работы с массивами
-    'arrLen',
-    'arrIncludes',
-    'arrIndexOf',
-    'arrFirst',
-    'arrLast',
-    'arrConcat',
-    'arrFilter',
-    'arrMap',
-    'arrSome',
-    'arrEvery',
-    'arrFind',
-    'arrFindIndex',
-    'arrSort',
-    'arrReverse',
-    'arrSlice',
-    'arrUnique',
-    'arrJoin',
-
-    // Функции для работы с Map
-    'mapFromEntries',
-    'mapGet',
-    'mapHas',
-    'mapKeys',
-    'mapValues',
-    'mapEntries',
-    'mapSize',
-
-    // Функции для работы с Set
-    'setFromValues',
-    'setHas',
-    'setValues',
-    'setSize',
-    'setUnion',
-    'setIntersection',
-    'setDifference',
-]
+const safeFunctions = filtrexFunctionNames
 
 /**
  * Проверяет строку на наличие JavaScript кода
@@ -317,7 +286,7 @@ function validateExpressionSecurity(
         /[\x00-\x1F\x7F-\x9F]/g,
 
         // HTML and JavaScript
-        /<[^>]*>/g,
+        // /<[^>]*>/g,
         /\bjavascript:/gi,
 
         // Debugging constructs
@@ -360,7 +329,7 @@ function validateExpressionSecurity(
     for (const pattern of maliciousPatterns) {
         if (pattern.test(expression)) {
             throw new Error(
-                `Security violation: forbidden pattern detected in expression`,
+                `Security violation: forbidden pattern ${pattern} detected in expression ${expression}`,
             )
         }
     }
@@ -729,8 +698,9 @@ export function createSafeFilter<T>(
             /(["'])(?:\\.|[^\\])*?\1/g,
             '',
         )
-        const usedFields =
+        const usedFields = (
             expressionWithoutStrings.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || []
+        ).filter((field) => !safeFunctions.includes(field))
 
         // Создаем обертку для проверки разрешенных полей и операторов
         return (data: T) => {
@@ -771,16 +741,24 @@ export function createSafeFilter<T>(
                     throw new Error('Unauthorized operator')
                 }
             }
-
-            return Boolean(filter(data))
+            let result = false
+            try {
+                result = filter(data)
+                if (typeof result === 'boolean') {
+                    return result
+                }
+                return false
+            } catch (error) {
+                console.error('Error in createSafeFilter:', error)
+                result = false
+            }
+            return result
         }
     } catch (error) {
         console.error('Error in createSafeFilter:', error)
         throw new Error(`Error in createSafeFilter: ${error}`)
     }
 }
-
-
 
 export function sanitizeForEval(input: string): string {
     // Удаляем все потенциально опасные символы и конструкции

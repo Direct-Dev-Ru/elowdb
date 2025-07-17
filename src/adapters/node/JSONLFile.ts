@@ -17,9 +17,9 @@ import { PathLike } from 'node:fs'
 import { FileHandle } from 'node:fs/promises'
 import os from 'node:os'
 import readline from 'node:readline'
+import { ReadableStreamDefaultController } from 'node:stream/web'
 
 import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
-import { UUID } from 'bson'
 import { EventEmitter } from 'events'
 import { cloneDeep } from 'lodash'
 import path from 'path'
@@ -43,6 +43,7 @@ import {
     LinePositionsManager,
 } from '../../common/positions/position.js'
 import { createSafeFilter } from '../../common/utils/filtrex'
+import { parseWithUndefined,stringifyWithUndefined } from '../../common/utils/jsonSerializers'
 import {
     createSafeSiftFilter,
     isMongoDbLikeFilter,
@@ -50,7 +51,6 @@ import {
 import { capitalize } from '../../common/utils/strings'
 import { JSONLTransaction } from '../../core/Transaction'
 import { defNodeDecrypt, defNodeEncrypt } from './TextFile.js'
-
 export interface TransactionOptions {
     rollback?: boolean
     mutex?: RWMutex
@@ -75,8 +75,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         cypherKey: string,
     ) => Promise<string | { error: string }>
 
-    #mutex = new RWMutex()
-    #endTransactionMutex = new RWMutex()
+    #beginTransactionMutex
+
     #selectCache: Cache<T> | null = null
     #events = new EventEmitter()
 
@@ -90,7 +90,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     #defaultMethodsOptions: LineDbAdapterOptions = {
         inTransaction: false,
     }
-    #beginTransactionMutex = new RWMutex()
+    unlockTransactionMutexFunction: (() => void) | undefined = undefined
+    unlockTransactionCreationFunction: (() => void) | undefined = undefined
 
     #filterIndexedFields(fields: (keyof T)[]): (keyof T)[] {
         if (!fields || fields.length === 0) return []
@@ -111,6 +112,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         _cypherKey: string = '',
         options: JSONLFileOptions<T> = { allocSize: 256 },
     ) {
+        this.#beginTransactionMutex = new RWMutex()
+        // this.#endTransactionMutex = this.#beginTransactionMutex
+
         this.#constructorOptions = {
             ...options,
             indexedFields: options.indexedFields
@@ -125,8 +129,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         this.#filename = filename
         this.#cypherKey = _cypherKey
         this.#allocSize = options.allocSize || 256
-        this.#parse = options.parse || JSON.parse
-        this.#stringify = options.stringify || JSON.stringify
+        this.#parse = options.parse || parseWithUndefined
+        this.#stringify = options.stringify || stringifyWithUndefined
 
         const _decrypt = options?.decrypt || defNodeDecrypt
         const _encrypt = options?.encrypt || defNodeEncrypt
@@ -1047,7 +1051,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         }
 
         const readResult =
-            this.#inTransactionMode || options.inTransaction
+            this.#inTransactionMode ||
+            options.inTransaction ||
+            options.internalCall
                 ? await payload()
                 : await filePositions.getMutex().withReadLock(payload)
 
@@ -1089,55 +1095,38 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         const payload = async (): Promise<number | Partial<T>[]> => {
             let deletedCount = 0
             const deletedRecords: Partial<T>[] = []
-            for (const item of dataArray) {
-                const positions = await filePositions.getPositionByDataNoLock(
-                    item as T,
-                    (item as T)?.id
-                        ? (data: T) => [`byId:${data.id}`]
-                        : this.#idFn,
-                )
-                // если нашли по индексу что то, то удаляем по этим данным
-                if (positions.size > 0) {
+            let continueWithDelete = true
+            let idArray: { id: string }[] = []
+            let restDataToDelete: Partial<T>[] = []
+            // if data is not a string, we need to process it as an array and find all by indexes in one iteration
+            if (typeof data !== 'string') {
+                const dataToProcess = Array.isArray(data) ? data : [data]
+                idArray = dataToProcess.map((item) => {
+                    if (item.id) {
+                        return { id: item.id as string }
+                    }
+                    return { id: 'undefined' }
+                })
+
+                const positionsByIds =
+                    await filePositions.getNumberPositionsByArrayNoLock(
+                        idArray.filter((item) => item.id !== 'undefined'),
+                        (item) => [`byId:${item.id}`],
+                    )
+                if (positionsByIds.size > 0) {
                     const fileHandle = await fs.promises.open(
                         this.#filename,
                         'r+',
                     )
+                    const emptyLine = `${' '.repeat(this.#allocSize - 1)}\n`
                     try {
-                        const processedPositions = new Set<number>()
-                        for (const [id, posArray] of positions) {
+                        for (const [_, posArray] of positionsByIds) {
                             for (const pos of posArray) {
-                                const currentPosition =
-                                    pos instanceof FilePosition
-                                        ? pos.position
-                                        : pos
-                                // if position is already processed, skip
-                                if (processedPositions.has(currentPosition)) {
-                                    continue
-                                }
-                                processedPositions.add(currentPosition)
-                                // Fill line with spaces
-                                const emptyLine = `${' '.repeat(
-                                    this.#allocSize - 1,
-                                )}\n`
-                                const record = await this.#readRecords(
-                                    new Set([currentPosition]),
-                                )
-                                // add to deletedRecords if record is found
-                                if (record) {
-                                    deletedRecords.push({
-                                        id: record[0].id,
-                                    } as Partial<T>)
-                                }
-                                // deleting record in file - fill by spaces
-                                const writePosition =
-                                    pos instanceof FilePosition
-                                        ? pos.position
-                                        : pos
                                 await fileHandle.write(
                                     Buffer.from(emptyLine),
                                     0,
                                     emptyLine.length,
-                                    writePosition,
+                                    pos,
                                 )
                                 await filePositions.replacePositionNoLock(
                                     pos,
@@ -1145,107 +1134,192 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                                 )
                                 deletedCount++
                                 this.$hasDeletedRecords = true
-                                if (this.#hasCache()) {
-                                    // Эмитим событие удаления
-                                    this.#events.emit('record:delete', item)
-                                }
                             }
                         }
                     } finally {
                         await fileHandle.close()
                     }
-                } else {
-                    // если не нашли по индексу, то читаем все записи и удаляем по этим данным
+                    deletedRecords.push(
+                        ...(idArray.filter(
+                            (item) => item.id !== 'undefined',
+                        ) as Partial<T>[]),
+                    )
+                    if (this.#hasCache()) {
+                        for (const item of deletedRecords) {
+                            // Emit event of deletion
+                            this.#events.emit('record:delete', item)
+                        }
+                    }
+                }
+
+                continueWithDelete = idArray.some(
+                    (item) => item.id === 'undefined',
+                )
+                restDataToDelete = dataToProcess.filter((item) => {
+                    if (item.id) {
+                        return false
+                    }
+                    return true
+                })
+            }
+
+            if (continueWithDelete) {
+                for (const item of dataArray) {
                     const allPositions =
                         await filePositions.getAllPositionsNoLock('byId:')
-
-                    const filter =
-                        typeof item === 'string'
-                            ? createSafeFilter<T>(item, {
-                                  skipValidation: true,
-                              })
-                            : this.#fallbackFilter(item, options)
-
-                    const records = await this.#readRecords(
-                        allPositions,
-                        filter,
-                    )
-
-                    const emptyLine = `${' '.repeat(this.#allocSize - 1)}\n`
-                    const fileHandle = await fs.promises.open(
-                        this.#filename,
-                        'r+',
-                    )
-                    try {
-                        const processedPositions = new Set<number>()
-                        for (const record of records) {
-                            const positions =
-                                await filePositions.getPositionByDataNoLock(
-                                    record,
-                                    (data) => [`byId:${data.id}`],
-                                )
-                            if (positions.size > 0) {
-                                for (const [id, posArray] of positions) {
-                                    for (const pos of posArray) {
-                                        const currentPosition =
-                                            pos instanceof FilePosition
-                                                ? pos.position
-                                                : pos
-                                        // if position is already processed, skip
-                                        if (
-                                            processedPositions.has(
-                                                currentPosition,
-                                            )
-                                        ) {
-                                            continue
-                                        }
-                                        processedPositions.add(currentPosition)
-                                        // add to deletedRecords if record is found
-                                        if (record) {
-                                            deletedRecords.push({
-                                                id: record.id,
-                                            } as Partial<T>)
-                                        }
-                                        // deleting record in file - fill by spaces
-                                        const writePosition =
-                                            pos instanceof FilePosition
-                                                ? pos.position
-                                                : pos
-
-                                        await fileHandle.write(
-                                            Buffer.from(emptyLine),
-                                            0,
-                                            emptyLine.length,
-                                            writePosition,
-                                        )
-                                        await filePositions.replacePositionNoLock(
-                                            pos,
-                                            new FilePosition(
-                                                -100,
-                                                true,
-                                                'deleted',
-                                            ),
-                                        )
+                    // if (positions.size > 0) {
+                    // it is not a bug - just make this code branch unused
+                    if (allPositions.size < 0) {
+                        const fileHandle = await fs.promises.open(
+                            this.#filename,
+                            'r+',
+                        )
+                        try {
+                            const processedPositions = new Set<number>()
+                            for (const [id, posArray] of allPositions) {
+                                for (const pos of posArray) {
+                                    const currentPosition =
+                                        pos instanceof FilePosition
+                                            ? pos.position
+                                            : pos
+                                    // if position is already processed, skip
+                                    if (
+                                        processedPositions.has(currentPosition)
+                                    ) {
+                                        continue
                                     }
+                                    processedPositions.add(currentPosition)
+                                    // Fill line with spaces
+                                    const emptyLine = `${' '.repeat(
+                                        this.#allocSize - 1,
+                                    )}\n`
+                                    const record = await this.#readRecords(
+                                        new Set([currentPosition]),
+                                    )
+                                    // add to deletedRecords if record is found
+                                    if (record) {
+                                        deletedRecords.push({
+                                            id: record[0].id,
+                                        } as Partial<T>)
+                                    }
+                                    // deleting record in file - fill by spaces
+                                    const writePosition =
+                                        pos instanceof FilePosition
+                                            ? pos.position
+                                            : pos
+                                    await fileHandle.write(
+                                        Buffer.from(emptyLine),
+                                        0,
+                                        emptyLine.length,
+                                        writePosition,
+                                    )
+                                    await filePositions.replacePositionNoLock(
+                                        pos,
+                                        new FilePosition(-100, true),
+                                    )
                                     deletedCount++
                                     this.$hasDeletedRecords = true
                                     if (this.#hasCache()) {
                                         // Эмитим событие удаления
-                                        this.#events.emit(
-                                            'record:delete',
-                                            record,
-                                        )
+                                        this.#events.emit('record:delete', item)
                                     }
                                 }
                             }
-                        }
-                    } finally {
-                        if (fileHandle) {
+                        } finally {
                             await fileHandle.close()
+                        }
+                    } else {
+                        const filter =
+                            typeof item === 'string'
+                                ? createSafeFilter<T>(item, {
+                                      skipValidation: true,
+                                  })
+                                : this.#fallbackFilter(item, options)
+
+                        const records = await this.#readRecords(
+                            allPositions,
+                            filter,
+                        )
+
+                        const emptyLine = `${' '.repeat(this.#allocSize - 1)}\n`
+                        const fileHandle = await fs.promises.open(
+                            this.#filename,
+                            'r+',
+                        )
+                        try {
+                            const processedPositions = new Set<number>()
+                            for (const record of records) {
+                                const positions =
+                                    await filePositions.getPositionByDataNoLock(
+                                        record,
+                                        (data) => [`byId:${data.id}`],
+                                    )
+                                if (positions.size > 0) {
+                                    for (const [id, posArray] of positions) {
+                                        for (const pos of posArray) {
+                                            const currentPosition =
+                                                pos instanceof FilePosition
+                                                    ? pos.position
+                                                    : pos
+                                            // if position is already processed, skip
+                                            if (
+                                                processedPositions.has(
+                                                    currentPosition,
+                                                )
+                                            ) {
+                                                continue
+                                            }
+                                            processedPositions.add(
+                                                currentPosition,
+                                            )
+                                            // add to deletedRecords if record is found
+                                            if (record) {
+                                                deletedRecords.push({
+                                                    id: record.id,
+                                                } as Partial<T>)
+                                            }
+                                            // deleting record in file - fill by spaces
+                                            const writePosition =
+                                                pos instanceof FilePosition
+                                                    ? pos.position
+                                                    : pos
+
+                                            await fileHandle.write(
+                                                Buffer.from(emptyLine),
+                                                0,
+                                                emptyLine.length,
+                                                writePosition,
+                                            )
+                                            await filePositions.replacePositionNoLock(
+                                                pos,
+                                                new FilePosition(
+                                                    -100,
+                                                    true,
+                                                    'deleted',
+                                                ),
+                                            )
+                                        }
+                                        deletedCount++
+                                        this.$hasDeletedRecords = true
+                                        if (this.#hasCache()) {
+                                            // Эмитим событие удаления
+                                            this.#events.emit(
+                                                'record:delete',
+                                                record,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } finally {
+                            if (fileHandle) {
+                                await fileHandle.close()
+                            }
                         }
                     }
                 }
             }
+
             return deletedRecords
         }
         if (this.#inTransactionMode || options.inTransaction) {
@@ -1380,10 +1454,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
     async write(data: T | T[], options?: LineDbAdapterOptions): Promise<void> {
         this.#ensureInitialized()
 
-        if (!options) {
-            options = this.#defaultMethodsOptions
-        }
-        this.#transactionGuard(options)
+        options = options
+            ? { ...options, ...this.#defaultMethodsOptions }
+            : { ...this.#defaultMethodsOptions }
+
+        // await this.#transactionGuard({ ...options, method: 'write' })
 
         // error throwing for test
         if (options.debugTag === 'throwError') {
@@ -1409,16 +1484,21 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             ? data
             : [data]
 
+        if (dataArray.length === 0) {
+            return
+        }
+
         const payload = async () => {
             // Проверяем существование файла и открываем с нужным флагом
 
-            // step 1: update existing records
+            // step 1: update existing records if options do not contain skipCheckExistingForWrite
             // return positions only [byId:id, byId:id, ...]
-            const existingIds =
-                await filePositions.getPositionsByArrayOfDataNoLock(
-                    dataArray,
-                    (item) => [`byId:${item.id}`],
-                )
+            const existingIds = options?.skipCheckExistingForWrite
+                ? new Map<string, FilePosition[]>()
+                : await filePositions.getPositionsByArrayOfDataNoLock(
+                      dataArray,
+                      (item) => [`byId:${item.id}`],
+                  )
 
             // check if file exists and open it with r+ flag
             const fileExists = await this.#fileExists(this.#filename.toString())
@@ -1466,9 +1546,16 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                         // ok first read existing record by id
                         const existingRecord = await this.readByFilter(
                             { id: posItemId },
-                            { ...options, inTransaction: true },
+                            {
+                                ...options,
+                                internalCall: true,
+                            },
                         )
                         if (existingRecord.length === 0) {
+                            // this.#logTest(
+                            //     posItemId,
+                            //     `existingRecord: ${existingRecord}`,
+                            // )
                             throw new Error(
                                 `Record with id ${posItemId} not found`,
                             )
@@ -1703,15 +1790,24 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         filterFunction?: FilterFunction<T>,
     ): Promise<T[]> {
         this.#ensureInitialized()
-        if (!options) {
-            options = this.#defaultMethodsOptions.inTransaction
-                ? this.#defaultMethodsOptions
-                : {
-                      inTransaction: false,
-                      strictCompare: false,
-                  }
-        }
-        this.#transactionGuard(options)
+        options = options
+            ? { ...options, ...this.#defaultMethodsOptions }
+            : this.#defaultMethodsOptions?.inTransaction
+            ? { ...this.#defaultMethodsOptions }
+            : {
+                  ...this.#defaultMethodsOptions,
+                  inTransaction: false,
+                  strictCompare: false,
+              }
+        // if (!options) {
+        //     options = this.#defaultMethodsOptions.inTransaction
+        //         ? this.#defaultMethodsOptions
+        //         : {
+        //               inTransaction: false,
+        //               strictCompare: false,
+        //           }
+        // }
+        // await this.#transactionGuard({ ...options, method: 'select' })
 
         const filePositions =
             this.#inTransactionMode || options.inTransaction
@@ -1755,7 +1851,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 }
                 return await this.#readRecords(positions)
             }
-            if (this.#inTransactionMode || options.inTransaction) {
+            if (
+                this.#inTransactionMode ||
+                options.inTransaction ||
+                options?.internalCall
+            ) {
                 return await payload()
             }
             return await filePositions.getMutex().withReadLock(payload)
@@ -1778,7 +1878,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             //  this.#logTest('Reading data by positions:', positions)
             return this.#readRecords(positions, filterFunction)
         }
-        if (this.#inTransactionMode || options.inTransaction) {
+        if (
+            this.#inTransactionMode ||
+            options.inTransaction ||
+            options?.internalCall
+        ) {
             // запуск без блокировок
             return await payload()
         }
@@ -1826,7 +1930,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         options?: LineDbAdapterOptions,
     ): Promise<T[]> {
         this.#ensureInitialized()
-        if (!options) {
+
+        if (options) {
+            options = { ...options, ...this.#defaultMethodsOptions }
+        } else {
             options = this.#defaultMethodsOptions.inTransaction
                 ? this.#defaultMethodsOptions
                 : {
@@ -1836,7 +1943,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                   }
         }
 
-        this.#transactionGuard(options)
+        await this.#transactionGuard({ ...options, method: 'readByFilter' })
 
         let filterData:
             | Partial<T>
@@ -1870,7 +1977,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     filterFunctionForIndexedSearch = createSafeFilter<
                         Partial<T>
                     >(filter as string, {
-                        allowedFields: this.#constructorOptions.indexedFields,
+                        // allowedFields: this.#constructorOptions.indexedFields,
                     })
                     doIndexedSearch = true
                 } catch (error) {
@@ -1975,10 +2082,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         options?: LineDbAdapterOptions,
     ): Promise<number | Partial<T>[]> {
         this.#ensureInitialized()
-        if (!options) {
-            options = this.#defaultMethodsOptions
-        }
-        this.#transactionGuard(options)
+        options = options
+            ? { ...options, ...this.#defaultMethodsOptions }
+            : { ...this.#defaultMethodsOptions }
+
+        await this.#transactionGuard({ ...options, method: 'delete' })
 
         // if we are already in transaction, just call private method
         if (options.inTransaction) {
@@ -1986,34 +2094,22 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         }
 
         // if we are not in transaction, open transaction
-        const transactionId = await this.beginTransaction({
-            rollback: true,
-            timeout: 20_000,
-        })
 
         let result: Partial<T>[] = []
-        try {
-            await this.withTransaction(
-                async (adapter, txOptions) => {
-                    const deleted = await adapter.#delete(data, {
-                        ...options,
-                        inTransaction: true,
-                        transactionId,
-                    })
-                    result = deleted as Partial<T>[]
-                    await this.endTransaction()
-                },
-                {
-                    ...options,
-                    inTransaction: true,
-                    transactionId,
-                },
-            )
-        } catch (error) {
-            await this.endTransaction()
-            throw error
-        }
-
+        await this.withTransaction(
+            async (a, aOptions) => {
+                const deleted = await a.#delete(data, aOptions)
+                result = deleted as Partial<T>[]
+            },
+            {
+                rollback: true,
+                timeout: 20_000,
+            },
+            {
+                ...options,
+                inTransaction: true,
+            },
+        )
         return result
     }
 
@@ -2022,10 +2118,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         options?: LineDbAdapterOptions,
     ): Promise<T[]> {
         this.#ensureInitialized()
-        if (!options) {
-            options = this.#defaultMethodsOptions
-        }
-        this.#transactionGuard(options)
+        options = options
+            ? { ...options, ...this.#defaultMethodsOptions }
+            : { ...this.#defaultMethodsOptions }
+
+        // await this.#transactionGuard({ ...options, method: 'insert' })
         let mergedData: Partial<T>[] = Array.isArray(data)
             ? data.map((item) => item as Partial<T>)
             : [data as Partial<T>]
@@ -2112,25 +2209,23 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 return mergedData as T[]
             }
 
-            // if not in transaction, open transaction like update
-            const transactionId = await this.beginTransaction({
-                rollback: true,
-                timeout: 20_000,
-            })
+            // if not in transaction, insert withTransaction
             await this.withTransaction(
                 async (adapter, txOptions) => {
                     await adapter.insert(mergedData as T[], {
-                        ...options,
+                        ...txOptions,
                         inTransaction: true,
-                        transactionId,
                     })
                 },
                 {
+                    rollback: true,
+                    timeout: 20_000,
+                },
+                {
+                    ...options,
                     inTransaction: true,
-                    transactionId,
                 },
             )
-            await this.endTransaction()
             return mergedData as T[]
         }
         return [] as T[]
@@ -2146,10 +2241,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         options?: LineDbAdapterOptions,
     ): Promise<T[]> {
         this.#ensureInitialized()
-        if (!options) {
-            options = this.#defaultMethodsOptions
-        }
-        this.#transactionGuard(options)
+        options = options
+            ? { ...options, ...this.#defaultMethodsOptions }
+            : { ...this.#defaultMethodsOptions }
+
+        await this.#transactionGuard({ ...options, method: 'update' })
 
         // Transform input data to array
         const dataArray = Array.isArray(data) ? data : [data]
@@ -2250,26 +2346,20 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             }
             await this.write(allUpdatedRecords, options)
         }
+
         if (this.#inTransactionMode || options.inTransaction) {
             await payload(options)
         } else {
-            const transactionId = await this.beginTransaction({
-                rollback: true,
-
-                timeout: 20_000,
-            })
             await this.withTransaction(
                 async (adapter, options) => {
                     await payload(options)
                 },
                 {
-                    inTransaction: true,
-                    transactionId,
+                    rollback: true,
+                    timeout: 20_000,
                 },
             )
-            await this.endTransaction()
         }
-
         return allUpdatedRecords
     }
 
@@ -2411,7 +2501,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         }
 
         this.#ensureInitialized()
-        if (!options) {
+        if (options) {
+            options = { ...options, ...this.#defaultMethodsOptions }
+        } else {
             options = this.#defaultMethodsOptions.inTransaction
                 ? this.#defaultMethodsOptions
                 : {
@@ -2420,7 +2512,8 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                       filterType: 'base',
                   }
         }
-        this.#transactionGuard(options)
+
+        await this.#transactionGuard({ ...options, method: 'select' })
 
         const tryByOneFieldFilterResult = await this.#trySelectByOneField(
             filter,
@@ -2444,6 +2537,10 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         limit: number = 20,
         options?: LineDbAdapterOptions,
     ): Promise<PaginatedResult<T>> {
+        options = options
+            ? { ...options, ...this.#defaultMethodsOptions }
+            : { ...this.#defaultMethodsOptions }
+
         const cacheKey = this.#getCacheKey(filter, options)
 
         // 1. try to get from cache
@@ -2458,7 +2555,6 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             // 2. get all data and cache it
             data = await this.select(filter, {
                 ...options,
-                inTransaction: true,
             })
             total = data.length
             this.#setToCache(cacheKey, data, total)
@@ -2478,84 +2574,159 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         }
     }
 
-    async beginTransaction(options?: TransactionOptions): Promise<string> {
-        const beginTransactionMutex = this.#beginTransactionMutex
+    async #beginTransaction(options?: TransactionOptions): Promise<string> {
+        this.#logTest('=== beginTransaction called ===')
+
         const defaultMutex = (
             await LinePositionsManager.getFilePositions(
                 this.#filename.toString(),
             )
         ).getMutex()
+        this.#logTest('defaultMutex state:', defaultMutex.state)
+
         const tmpDir = os.tmpdir()
+
+        // Block new transaction creation
+        this.#logTest('Acquiring transaction creation lock...')
+        const unlockTransactionCreation =
+            await this.#beginTransactionMutex.lock(options?.timeout ?? 10_000)
+        this.#logTest('Transaction creation lock acquired')
+
+        // Do not release the transaction creation lock here!
+        // Save it for release in endTransaction
+
         const transactionId = crypto.randomUUID()
+        this.#logTest('Created transaction ID:', transactionId)
+
         const backupFile = path.join(
             tmpDir,
             `elinedb-${path.basename(
                 this.#filename.toString(),
             )}.${transactionId}.backup`,
         )
-        // const localMutex = options?.mutex ?? defaultMutex
-        // const localMutex = options?.mutex ?? new RWMutex()
-        return await beginTransactionMutex.withWriteLock<string>(
-            async (): Promise<string> => {
-                // if (this.#transaction) {
-                const startTime = Date.now()
-                const timeout = (options?.timeout ?? 5000) / 2
 
-                while (Date.now() - startTime < timeout) {
-                    if (!this.#transaction) {
-                        // const endTimeToWait = Date.now()
-                        // this.#logTest(
-                        //     true,
-                        //     'time to wait',
-                        //     endTimeToWait - startTime,
-                        // )
-                        this.#inTransactionMode = true
-                        this.#transaction = new JSONLTransaction({
-                            id: transactionId,
-                            mode: 'write',
-                            timeout: options?.timeout ?? 10_000,
-                            rollback: options?.rollback ?? true,
-                            backupFile,
-                            doNotDeleteBackupFile: false,
-                            mutex: options?.mutex ?? defaultMutex,
-                        })
-
-                        const defaultMethodsOptions: LineDbAdapterOptions = {
-                            inTransaction: true,
-                            transactionId,
-                        }
-                        this.#defaultMethodsOptions = defaultMethodsOptions
-                        return this.#transaction?.transactionId ?? '-1'
-                    }
-                    // Wait 100 ms before next try
-                    await new Promise((resolve) => setTimeout(resolve, 1))
-                }
-                return '-1'
-            },
-            7500,
+        // Блокируем доступ к файлу
+        this.#logTest('Acquiring file access lock...')
+        this.unlockTransactionMutexFunction = await defaultMutex.lock(
+            options?.timeout ?? 10_000,
         )
+        this.#logTest('File access lock acquired')
+
+        // Save the function to release the transaction creation lock
+        this.unlockTransactionCreationFunction = unlockTransactionCreation
+
+        this.#inTransactionMode = true
+        this.#transaction = new JSONLTransaction({
+            id: transactionId,
+            mode: 'write',
+            timeout: options?.timeout ?? 10_000,
+            rollback: options?.rollback ?? true,
+            backupFile,
+            doNotDeleteBackupFile: false,
+            mutex: options?.mutex ?? defaultMutex,
+        })
+
+        const defaultMethodsOptions: LineDbAdapterOptions = {
+            inTransaction: true,
+            transactionId,
+        }
+        this.#defaultMethodsOptions = defaultMethodsOptions
+        this.#logTest('Start transaction: ', transactionId)
+        return this.#transaction?.transactionId ?? '-1'
     }
 
-    async endTransaction(): Promise<boolean> {
-        return await this.#endTransactionMutex.withWriteLock<boolean>(
-            async (): Promise<boolean> => {
-                this.#inTransactionMode = false
-                this.#transaction?.clearTimeout()
-                this.#transaction = null
-                this.#defaultMethodsOptions = { inTransaction: false }
-                await new Promise((resolve) => setTimeout(resolve, 1))
-                return true
-            },
-            10_000,
+    async beginTransactionV2(options?: TransactionOptions): Promise<string> {
+        this.#logTest('=== beginTransaction V2 called ===')
+        const tmpDir = os.tmpdir()
+        const transactionId = crypto.randomUUID()
+        this.#logTest('Created transaction ID:', transactionId)
+
+        const backupFile = path.join(
+            tmpDir,
+            `elinedb-${path.basename(
+                this.#filename.toString(),
+            )}.${transactionId}.backup`,
         )
+        const defaultMutex = (
+            await LinePositionsManager.getFilePositions(
+                this.#filename.toString(),
+            )
+        ).getMutex()
+        this.#logTest('defaultMutex state:', defaultMutex.state)
+
+        this.#inTransactionMode = true
+        this.#transaction = new JSONLTransaction({
+            id: transactionId,
+            mode: 'write',
+            timeout: options?.timeout ?? 10_000,
+            rollback: options?.rollback ?? true,
+            backupFile,
+            doNotDeleteBackupFile: false,
+            mutex: options?.mutex ?? defaultMutex,
+        })
+
+        const defaultMethodsOptions: LineDbAdapterOptions = {
+            inTransaction: true,
+            transactionId,
+        }
+        this.#defaultMethodsOptions = defaultMethodsOptions
+        this.#logTest('Start transaction: ', transactionId)
+        return this.#transaction?.transactionId ?? '-1'
     }
 
-    #transactionGuard(options?: LineDbAdapterOptions) {
+    async #endTransaction(): Promise<boolean> {
+        const payload = async (): Promise<boolean> => {
+            this.#inTransactionMode = false
+            this.#transaction?.clearTimeout()
+            this.#transaction = null
+            this.#defaultMethodsOptions = { inTransaction: false }
+            return true
+        }
+
+        const transactionId = this.#transaction?.transactionId
+        const result = await payload()
+
+        // Release all locks
+        if (this.unlockTransactionMutexFunction) {
+            this.unlockTransactionMutexFunction()
+            this.unlockTransactionMutexFunction = undefined
+            this.#logTest('End transaction: ', transactionId)
+        }
+
+        // Release the transaction creation lock
+        if (this.unlockTransactionCreationFunction) {
+            this.unlockTransactionCreationFunction()
+            this.unlockTransactionCreationFunction = undefined
+            this.#logTest(
+                'Transaction creation lock released in endTransaction',
+            )
+        }
+
+        return result
+    }
+
+    async endTransactionV2(): Promise<boolean> {
+        const payload = async (): Promise<boolean> => {
+            this.#inTransactionMode = false
+            this.#transaction?.clearTimeout()
+            this.#transaction = null
+            this.#defaultMethodsOptions = { inTransaction: false }
+            this.#logTest('End transaction V2: ', transactionId)
+            return true
+        }
+
+        const transactionId = this.#transaction?.transactionId
+        return await payload()
+    }
+
+    async #transactionGuard(options?: LineDbAdapterOptions) {
+        return
+
         if (!options) {
             options = this.#defaultMethodsOptions
         }
         if (
-            (this.#transaction || options.inTransaction) &&
+            (this.#transaction || options?.inTransaction) &&
             this.#transaction?.transactionId !== options?.transactionId
         ) {
             throw new Error(
@@ -2567,7 +2738,7 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         }
     }
 
-    async withTransaction(
+    async #withTransaction(
         callBack: (
             adapter: JSONLFile<T>,
             options?: LineDbAdapterOptions,
@@ -2577,16 +2748,18 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
         if (!this.#transaction) {
             throw new Error('Transaction not started')
         }
-        if (!options) {
-            options = { ...this.#defaultMethodsOptions, inTransaction: true }
-        }
-        this.#transactionGuard(options)
+
+        options = options
+            ? { ...options, ...this.#defaultMethodsOptions }
+            : { ...this.#defaultMethodsOptions, inTransaction: true }
+
+        this.#logTest('withTransaction', options)
+
+        await this.#transactionGuard({ ...options, method: 'all' })
 
         const filePositions = await LinePositionsManager.getFilePositions(
             this.#filename.toString(),
         )
-        const mutexLocal: RWMutex =
-            this.#transaction.mutex || filePositions.getMutex()
 
         const transactionLocal = this.#transaction
 
@@ -2595,9 +2768,11 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
             string | number,
             (number | FilePosition)[]
         >()
+
         try {
             try {
-                return await mutexLocal.withWriteLock(async () => {
+                // return await mutexLocal.withWriteLock(
+                const payload = async () => {
                     if (transactionLocal?.rollback) {
                         // Сохраняем текущее состояние файла данных
                         try {
@@ -2625,7 +2800,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                     }
                     // call useful function
                     await callBack(this, options ?? this.#defaultMethodsOptions)
-                })
+                }
+                // return await mutexLocal.withWriteLock(payload)
+                return payload()
             } catch (err) {
                 if (transactionLocal?.rollback) {
                     // restore filePositions state
@@ -2667,8 +2844,9 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 }. ${this.#collectionName}: ${err}`,
             )
         } finally {
-            this.#inTransactionMode = false
-
+            // if (this.unlockTransactionMutexFunction) {
+            //     this.unlockTransactionMutexFunction()
+            // }
             // Удаляем временный файл
             if (
                 backupCreated &&
@@ -2683,6 +2861,126 @@ export class JSONLFile<T extends LineDbAdapter> implements AdapterLine<T> {
                 }
             }
         }
+    }
+
+    async withTransaction(
+        callBack: (
+            adapter: JSONLFile<T>,
+            options?: LineDbAdapterOptions,
+        ) => Promise<unknown>,
+        transactionOptions?: TransactionOptions,
+        methodsOptions?: LineDbAdapterOptions,
+    ): Promise<void> {
+        const filePositions = await LinePositionsManager.getFilePositions(
+            this.#filename.toString(),
+        )
+        const mutexLocal = filePositions.getMutex()
+
+        let backupCreated = false
+        const positionsBackup = new Map<
+            string | number,
+            (number | FilePosition)[]
+        >()
+        this.#transaction
+        return this.#beginTransactionMutex.withWriteLock(
+            async () => {
+                await this.beginTransactionV2(transactionOptions)
+                const options = methodsOptions
+                    ? { ...methodsOptions, ...this.#defaultMethodsOptions }
+                    : { ...this.#defaultMethodsOptions }
+
+                this.#logTest(
+                    `${
+                        this.#collectionName
+                    } withTransaction options for methods:`,
+                    options,
+                    'defaultMethodsOptions:',
+                    this.#defaultMethodsOptions,
+                )
+
+                try {
+                    // try {
+                    const payload = async () => {
+                        if (this.#transaction?.rollback) {
+                            // Сохраняем текущее состояние файла данных
+                            try {
+                                await fs.promises.copyFile(
+                                    this.#filename.toString(),
+                                    this.#transaction.getBackupFile(),
+                                )
+                                // Создаем глубокую копию карты позиций
+                                for (const [
+                                    key,
+                                    positions,
+                                ] of await filePositions.getAllPositionsNoLock()) {
+                                    const positionsDeepClone =
+                                        cloneDeep(positions)
+                                    positionsBackup.set(key, positionsDeepClone)
+                                }
+                                backupCreated = true
+                            } catch (err) {
+                                // if file not exists, it's ok for new DB
+                                if (
+                                    (err as NodeJS.ErrnoException).code !==
+                                    'ENOENT'
+                                ) {
+                                    throw err
+                                }
+                            }
+                        }
+                        // call useful function
+                        await callBack(this, {
+                            ...options,
+                            ...this.#defaultMethodsOptions,
+                        })
+                    }
+                    return await mutexLocal.withWriteLock(payload)
+                } catch (err) {
+                    // Восстанавливаем состояние из бэкапа при ошибке
+                    if (backupCreated && this.#transaction?.rollback) {
+                        try {
+                            await fs.promises.copyFile(
+                                this.#transaction.getBackupFile(),
+                                this.#filename.toString(),
+                            )
+                            await filePositions.setAllPositionsNoLock(
+                                positionsBackup,
+                            )
+                        } catch (restoreErr) {
+                            throw new Error(
+                                `Failed to restore from backup: ${restoreErr}. Original error: ${err}`,
+                            )
+                        }
+                    }
+
+                    throw new Error(
+                        `Error in transaction mode. Rollback: ${
+                            this.#transaction?.rollback ? 'done' : 'not done'
+                        }. ${this.#collectionName}: ${err}`,
+                    )
+                } finally {
+                    // Удаляем временный файл
+                    if (
+                        backupCreated &&
+                        this.#transaction?.rollback &&
+                        !this.#transaction?.doNotDeleteBackupFile
+                    ) {
+                        try {
+                            await fs.promises.unlink(
+                                this.#transaction.getBackupFile(),
+                            )
+                        } catch (unlinkErr) {
+                            // log error of removing backup file, but not break execution
+                            console.error(
+                                `Failed to remove backup file: ${unlinkErr}`,
+                            )
+                        }
+                    }
+                    await this.endTransactionV2()
+                }
+            },
+            transactionOptions?.timeout ?? 10_000,
+        )
     }
 
     // Метод для очистки при уничтожении объекта

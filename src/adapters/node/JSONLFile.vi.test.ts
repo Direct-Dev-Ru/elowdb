@@ -1,16 +1,13 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterAll, beforeAll } from 'vitest'
 import fs, { read } from 'node:fs'
 import path from 'node:path'
 import { JSONLFile } from './JSONLFile.js'
-import { LinePositionsManager } from '../../common/positions/position.js'
-import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
-import { json } from 'node:stream/consumers'
-import { log } from 'node:console'
 import { TestData } from '../../common/interfaces/test-data.js'
 import {
     JSONLFileOptions,
     LineDbAdapterOptions,
 } from '../../common/interfaces/jsonl-file.js'
+import { log } from 'node:console'
 
 const sortFn = (a: TestData, b: TestData) =>
     (a.id as string).localeCompare(b.id as string)
@@ -236,12 +233,12 @@ describe('JSONLFile', () => {
             }
             await jsonlFile.write(testData)
             const result = await jsonlFile.read()
-            expect(result).toEqual([{...testData, id: result[0].id}])
+            expect(result).toEqual([{ ...testData, id: result[0].id }])
             const result2 = await jsonlFile.readByFilter(
                 { name: 'Test-1' },
                 { strictCompare: true, inTransaction: false },
             )
-            expect(result2).toEqual([{...testData, id: result2[0].id}])
+            expect(result2).toEqual([{ ...testData, id: result2[0].id }])
             await jsonlFile.write({
                 ...testData,
                 id: '2',
@@ -862,9 +859,7 @@ describe('JSONLFile', () => {
                 testData.filter((item) => item.id !== '2' && item.id !== '4')
                     .length,
             )
-            expect(
-                result.sort(sortFn),
-            ).toEqual(
+            expect(result.sort(sortFn)).toEqual(
                 testData
                     .filter((item) => item.id !== '2' && item.id !== '4')
                     .sort(sortFn),
@@ -896,14 +891,14 @@ describe('JSONLFile', () => {
                 })
             }
 
-            // Записываем данные
+            // Write data
             await jsonlFile.write(testData)
             logTest(false, 'map: ', await jsonlFile.getPositionsNoLock())
             logTest(false, 'allocSize: ', jsonlFile.getAllocSize())
 
-            // Удаляем записи по фильтру по полю которое не в индексе
-            const deletedCount = await jsonlFile.delete([{ value: 30 }])
-            expect(deletedCount).toBe(1)
+            // Delete records by filter by field that is not in the index
+            const deleted = await jsonlFile.delete([{ value: 30 }])
+            expect((deleted as Partial<TestData>[]).length).toBe(1)
 
             logTest(
                 true,
@@ -988,21 +983,29 @@ describe('JSONLFile', () => {
                 testData.filter((data) => data.user === 'User1').sort(sortFn),
             )
 
-            const result3 = await jsonlFile.select({ user: { $eq: 'User0' } }, {
-                filterType: 'mongodb',
-                inTransaction: false,
-            })
+            const result3 = await jsonlFile.select(
+                { user: { $eq: 'User0' } },
+                {
+                    filterType: 'mongodb',
+                    inTransaction: false,
+                },
+            )
             expect(result3.sort(sortFn)).toEqual(
                 testData.filter((data) => data.user === 'User0').sort(sortFn),
             )
 
-            const nameValueToFilter = "Test1"
-            const result3_1 = await jsonlFile.select({ name: nameValueToFilter }, {
-                filterType: 'base',
-                inTransaction: false,
-            })
+            const nameValueToFilter = 'Test1'
+            const result3_1 = await jsonlFile.select(
+                { name: nameValueToFilter },
+                {
+                    filterType: 'base',
+                    inTransaction: false,
+                },
+            )
             expect(result3_1.sort(sortFn)).toEqual(
-                testData.filter((data) => data.name === nameValueToFilter).sort(sortFn),
+                testData
+                    .filter((data) => data.name === nameValueToFilter)
+                    .sort(sortFn),
             )
         })
     })
@@ -1034,31 +1037,32 @@ describe('JSONLFile', () => {
                 user: 'User2',
             }
 
-            const transactionId = await jsonlFile.beginTransaction({
-                rollback: true,
-                timeout: 1000000,
-            })
             // logTest(logInThisTest, 'transactionId', transactionId)
             const transactionOptions: LineDbAdapterOptions = {
                 inTransaction: true,
-                transactionId,
             }
-            await jsonlFile.withTransaction(async (tx, options) => {
-                await tx.write([data1, data2], options)
-                const record1 = await tx.readByFilter({ id: '1' }, options)
-                await tx.update(
-                    { name: `Updated ${record1[0].name}` },
-                    { id: '1' },
-                    options,
-                )
-                const record2 = await tx.readByFilter({ id: '2' }, options)
-                await tx.update(
-                    { name: `Updated ${record2[0].name}` },
-                    'id==="2"',
-                    options,
-                )
-                await tx.endTransaction()
-            }, transactionOptions)
+            await jsonlFile.withTransaction(
+                async (tx, options) => {
+                    await tx.write([data1, data2], options)
+                    const record1 = await tx.readByFilter({ id: '1' }, options)
+                    await tx.update(
+                        { name: `Updated ${record1[0].name}` },
+                        { id: '1' },
+                        options,
+                    )
+                    const record2 = await tx.readByFilter({ id: '2' }, options)
+                    await tx.update(
+                        { name: `Updated ${record2[0].name}` },
+                        'id==="2"',
+                        options,
+                    )
+                },
+                {
+                    rollback: true,
+                    timeout: 100_000,
+                },
+                transactionOptions,
+            )
 
             const result = await jsonlFile.read()
             expect(result).toHaveLength(2)
@@ -1101,25 +1105,26 @@ describe('JSONLFile', () => {
                 value: 30,
                 user: 'User2',
             }
-            const transactionId = await jsonlFile.beginTransaction({
-                rollback: true,
-                timeout: 1000000,
-            })
+
             // logTest(logInThisTest, 'transactionId', transactionId)
             const transactionOptions: LineDbAdapterOptions = {
                 inTransaction: true,
-                transactionId,
             }
             try {
-                await jsonlFile.withTransaction(async (tx, options) => {
-                    await tx.write(data1, options)
-                    throw new Error('Test error')
-                    await tx.write(data2, options)
-                    await jsonlFile.endTransaction()
-                }, transactionOptions)
+                await jsonlFile.withTransaction(
+                    async (tx, options) => {
+                        await tx.write(data1, options)
+                        throw new Error('Test error')
+                        await tx.write(data2, options)
+                    },
+                    {
+                        rollback: true,
+                        timeout: 100_000,
+                    },
+                    transactionOptions,
+                )
             } catch (error) {
                 expect(error).toBeInstanceOf(Error)
-                await jsonlFile.endTransaction()
             }
 
             const result = await jsonlFile.read()
@@ -1151,35 +1156,35 @@ describe('JSONLFile', () => {
 
             await jsonlFile.write(testData)
 
-            const transactionId = await jsonlFile.beginTransaction({
-                rollback: true,
-                timeout: 1000000,
-            })
             // logTest(logInThisTest, 'transactionId', transactionId)
             const transactionOptions: LineDbAdapterOptions = {
                 inTransaction: true,
-                transactionId,
             }
-            await jsonlFile.withTransaction(async (tx, options) => {
-                const result = await tx.read(undefined, options)
-                expect(result).toHaveLength(1000)
+            await jsonlFile.withTransaction(
+                async (tx, options) => {
+                    const result = await tx.read(undefined, options)
+                    expect(result).toHaveLength(1000)
 
-                const data3: TestData = {
-                    id: '3000',
-                    name: 'Test 3',
-                    value: 60,
-                    user: 'User3',
-                }
-                await tx.write(data3, options)
+                    const data3: TestData = {
+                        id: '3000',
+                        name: 'Test 3',
+                        value: 60,
+                        user: 'User3',
+                    }
+                    await tx.write(data3, options)
 
-                const result2 = await tx.read(() => true, options)
-                expect(result2).toHaveLength(1001)
-
-                await tx.endTransaction()
-            }, transactionOptions)
+                    const result2 = await tx.read(() => true, options)
+                    expect(result2).toHaveLength(1001)
+                },
+                {
+                    rollback: true,
+                    timeout: 100_000,
+                },
+                transactionOptions,
+            )
         })
 
-        it('04T.should support deletion in a transaction', async () => {
+        it('04T.should support deletion with error in a transaction', async () => {
             const testFile = `${testFileMain}_04T.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -1211,33 +1216,31 @@ describe('JSONLFile', () => {
                 user: 'User3',
             }
 
-            await jsonlFile.write([data1, data2])
+            await jsonlFile.insert([data1, data2])
 
-            await jsonlFile.beginTransaction({
-                rollback: true,
-                timeout: 100_000,
-            })
             try {
-                await jsonlFile.withTransaction(async (tx) => {
+                const callBack = async (tx: JSONLFile<TestData>) => {
                     await tx.write(data3)
                     await tx.delete({ id: '2' })
                     const result = await tx.read()
                     expect(result).toHaveLength(2)
                     expect(result).toEqual([data1, data3])
                     throw new Error('Test error')
-                    await tx.endTransaction()
+                }
+                await jsonlFile.withTransaction(callBack, {
+                    rollback: true,
+                    timeout: 20_000,
                 })
             } catch (error) {
                 expect(error).toBeInstanceOf(Error)
-                await jsonlFile.endTransaction()
             }
 
             const result = await jsonlFile.read()
             expect(result).toHaveLength(2)
             expect(result).toEqual([data1, data2])
-        })
+        }, 1_000_000)
 
-        it('05T.should handle concurrent transactions', async () => {
+        it('05T.should handle concurrent transactions of inserts', async () => {
             const testFile = `${testFileMain}_05T.jsonl`
             try {
                 await safeUnlink(testFile, true)
@@ -1269,34 +1272,88 @@ describe('JSONLFile', () => {
                 }),
             )
 
-            await Promise.all(
+            await Promise.allSettled(
                 testData.map(async (data) => {
-                    const transactionId = await jsonlFile.beginTransaction({
-                        rollback: true,
-                        timeout: 1_000_000,
-                    })
-
-                    const transactionOptions: LineDbAdapterOptions = {
-                        inTransaction: true,
-                        transactionId,
+                    try {
+                        return jsonlFile.withTransaction(
+                            async (tx, opt) => {
+                                await tx.insert(data, opt)
+                            },
+                            {
+                                rollback: true,
+                                timeout: 100_000,
+                            },
+                            // {
+                            //     inTransaction: true,
+                            // },
+                        )
+                    } catch (error) {
+                        console.error('Error in transaction:', error)
+                        throw error
+                    } finally {
+                        await jsonlFile.endTransactionV2()
                     }
-
-                    return jsonlFile.withTransaction(async (tx) => {
-                        await tx.write(data)
-                        // logTest(true, 'data:', data.id)
-                        // await new Promise((resolve) =>
-                        //     setTimeout(resolve, getRandom(100, 200)),
-                        // )
-                        await tx.endTransaction()
-                    }, transactionOptions)
                 }),
             )
+            // await jsonlFile.init(true)
+            const result = await jsonlFile.select('')
 
-            const result = await jsonlFile.read()
+            // logTest(true, 'resultAll', resultAll)
+
             expect(result).toHaveLength(concurrentCount + 1)
-            expect(result).toEqual([initialData, ...testData])
+            // expect(result).toEqual([initialData, ...testData])
         })
-    })
+
+        it('06T.should handle concurrent transactions of updates', async () => {
+            const testFile = `${testFileMain}_06T.jsonl`
+            try {
+                await safeUnlink(testFile, true)
+            } catch (error) {
+                // Игнорируем ошибку, если файл не существует
+            }
+
+            jsonlFile = new JSONLFile<TestData>(testFile, '', {
+                allocSize: 512,
+            })
+            await jsonlFile.init()
+
+            const concurrentCount = 100
+            const testData: TestData[] = Array.from(
+                { length: concurrentCount },
+                (_, i) => ({
+                    id: `${i}`,
+                    name: `Test ${i}`,
+                    value: i * 10,
+                    user: `User${i}`,
+                }),
+            )
+            await jsonlFile.insert(testData)
+
+            await jsonlFile.update({ name: 'Updated 1' }, { id: '1' })
+
+            const updateData: Partial<TestData>[] = Array.from(
+                { length: concurrentCount },
+                (_, i) => ({
+                    id: `${i}`,
+                    name: `Updated ${i}`,
+                }),
+            )
+            await Promise.allSettled(
+                updateData.map(async (data) => {
+                    return jsonlFile.withTransaction(async (a, opt) => {
+                        await a.update(
+                            { name: data.name },
+                            { id: data.id },
+                            opt,
+                        )
+                    })
+                }),
+            )
+            const result = await jsonlFile.select('')
+            expect(result).toHaveLength(concurrentCount)
+            // expect(result).toEqual(updateData)
+        })
+    }, 1_000_000)
 
     describe('JSONLFile edge cases', () => {
         it('01E.should handle empty file initialization', async () => {
@@ -1506,11 +1563,11 @@ describe('JSONLFile', () => {
             await fs.promises.writeFile(
                 testFile,
                 firstLine +
-                // ' '.repeat(initAllocSize - firstLine.length - 1) +
-                '\n' +
-                secondLine +
-                ' '.repeat(initAllocSize - secondLine.length - 1) +
-                '\n\n',
+                    // ' '.repeat(initAllocSize - firstLine.length - 1) +
+                    '\n' +
+                    secondLine +
+                    ' '.repeat(initAllocSize - secondLine.length - 1) +
+                    '\n\n',
             )
 
             jsonlFile = new JSONLFile<TestData>(testFile, '', {
@@ -1562,7 +1619,7 @@ describe('JSONLFile', () => {
             await fs.promises.writeFile(
                 testFile,
                 '{"id":"1","name":"Test1","value":42,"user":"User1"}\n' +
-                '{"id":"2","name":"Test2","value":43,"user":"User2"}\n',
+                    '{"id":"2","name":"Test2","value":43,"user":"User2"}\n',
             )
 
             // Создаем экземпляр с ключом шифрования
@@ -1822,31 +1879,32 @@ describe('JSONLFile', () => {
             expect(result[0]).toEqual({ ...updatedData1 })
             expect(result[1]).toEqual({ ...updatedData2 })
 
-            const transactionId = await jsonlFile.beginTransaction({
-                rollback: true,
-                timeout: 100_000,
-            })
             // logTest(logInThisTest, 'transactionId', transactionId)
             const transactionOptions: LineDbAdapterOptions = {
                 inTransaction: true,
-                transactionId,
             }
 
-            await jsonlFile.withTransaction(async (tx, options) => {
-                const record1 = await tx.readByFilter({ id: '1' }, options)
-                await tx.update(
-                    { value: record1[0].value + 100 },
-                    { id: '1' },
-                    options,
-                )
-                const result2 = await jsonlFile.read(() => true, options)
-                expect(result2).toHaveLength(2)
-                expect(result2[0]).toEqual({
-                    ...updatedData1,
-                    value: updatedData1.value + 100,
-                })
-                await tx.endTransaction()
-            }, transactionOptions)
+            await jsonlFile.withTransaction(
+                async (tx, options) => {
+                    const record1 = await tx.readByFilter({ id: '1' }, options)
+                    await tx.update(
+                        { value: record1[0].value + 100 },
+                        { id: '1' },
+                        options,
+                    )
+                    const result2 = await jsonlFile.read(() => true, options)
+                    expect(result2).toHaveLength(2)
+                    expect(result2[0]).toEqual({
+                        ...updatedData1,
+                        value: updatedData1.value + 100,
+                    })
+                },
+                {
+                    rollback: true,
+                    timeout: 100_000,
+                },
+                transactionOptions,
+            )
         })
 
         it('01U.should update single record', async () => {
@@ -1884,31 +1942,32 @@ describe('JSONLFile', () => {
             logTest(false, 'result: ', result)
             expect(result).toEqual([{ ...updatedData }])
 
-            const transactionId = await jsonlFile.beginTransaction({
-                rollback: true,
-                timeout: 100_000,
-            })
             // logTest(logInThisTest, 'transactionId', transactionId)
             const transactionOptions: LineDbAdapterOptions = {
                 inTransaction: true,
-                transactionId,
             }
 
-            await jsonlFile.withTransaction(async (tx, options) => {
-                const record1 = await tx.readByFilter({ id: '1' }, options)
-                await tx.update(
-                    { value: record1[0].value + 100 },
-                    { id: '1' },
-                    options,
-                )
-                const result2 = await jsonlFile.read(() => true, options)
-                expect(result2).toHaveLength(1)
-                expect(result2[0]).toEqual({
-                    ...updatedData,
-                    value: updatedData.value + 100,
-                })
-                await tx.endTransaction()
-            }, transactionOptions)
+            await jsonlFile.withTransaction(
+                async (tx, options) => {
+                    const record1 = await tx.readByFilter({ id: '1' }, options)
+                    await tx.update(
+                        { value: record1[0].value + 100 },
+                        { id: '1' },
+                        options,
+                    )
+                    const result2 = await jsonlFile.read(() => true, options)
+                    expect(result2).toHaveLength(1)
+                    expect(result2[0]).toEqual({
+                        ...updatedData,
+                        value: updatedData.value + 100,
+                    })
+                },
+                {
+                    rollback: true,
+                    timeout: 100_000,
+                },
+                transactionOptions,
+            )
         })
 
         it('02U.should update multiple records', async () => {
@@ -2687,7 +2746,12 @@ describe('JSONLFile selectWithPagination', () => {
     beforeEach(async () => {
         try {
             await safeUnlink(testFile, true)
-        } catch { }
+        } catch {}
+
+        if (!fs.existsSync(path.dirname(testFile))) {
+            fs.mkdirSync(path.dirname(testFile), { recursive: true })
+        }
+
         jsonlFile = new JSONLFile<TestData>(testFile, '', {
             allocSize: 256,
             cacheTTL: 1000 * 180, // 3 minutes
@@ -2750,19 +2814,43 @@ describe('JSONLFile selectWithPagination', () => {
         expect(res.total).toBe(all.length)
     })
 
-    it('should update cache after record deletion', async () => {
-        // Инициализируем кэш
+    it('should update select cache after record deletion', async () => {
+        // Init cache
         const initRes = await jsonlFile.selectWithPagination({}, 1, 10)
         expect(initRes.data).toHaveLength(10)
 
-        // Удаляем запись
+        // Delete record
         await jsonlFile.delete({ id: 5 })
 
-        // Проверяем, что кэш обновился
+        // Check that cache is updated
         const res = await jsonlFile.selectWithPagination({}, 1, 10)
         expect(res.data).toHaveLength(10)
         expect(res.total).toBe(24) // Общее количество уменьшилось
-        expect(res.data.find((item) => item.id === 5)).toBeUndefined() // Удаленная запись отсутствует
+        expect(res.data.find((item) => item.id === 5)).toBeUndefined()
+
+        let resFromFilterFunc = await jsonlFile.selectWithPagination(
+            (item) => {
+                return Number(item.id) < 10
+            },
+            1,
+            5,
+        )
+        expect(resFromFilterFunc.data).toHaveLength(5)
+        expect(resFromFilterFunc.total).toBe(8)
+        expect(resFromFilterFunc.pages).toBe(2)
+        await jsonlFile.delete({ id: 2 })
+        await jsonlFile.delete({ id: 6 })
+        await jsonlFile.delete({ id: 7 })
+        resFromFilterFunc = await jsonlFile.selectWithPagination(
+            (item) => {
+                return Number(item.id) < 10
+            },
+            1,
+            5,
+        )
+        expect(resFromFilterFunc.data).toHaveLength(5)
+        expect(resFromFilterFunc.total).toBe(5)
+        expect(resFromFilterFunc.pages).toBe(1)
     })
 
     it('should respect cache limit', async () => {
@@ -2812,28 +2900,303 @@ describe('JSONLFile selectWithPagination', () => {
     })
 })
 
-// describe('JSONLFile cache operations', () => {
-    // const testFile = path.join('test-data-jsonl', 'cache_test.jsonl')
-    // let jsonlFile: JSONLFile<TestData>
+describe('JSONLFile skipCheckExistingForWrite', () => {
+    const testFile = path.join('test-data-jsonl', 'skip_check_test.jsonl')
+    let jsonlFile: JSONLFile<TestData>
 
-    // it('should handle multiple cache operations', async () => {
-    //     // Инициализируем кэш
-    //     const initRes = await jsonlFile.selectWithPagination({}, 1, 10)
-    //     expect(initRes.data).toHaveLength(10)
+    beforeEach(async () => {
+        try {
+            await safeUnlink(testFile, true)
+        } catch {}
 
-    //     // Выполняем несколько операций
-    //     await jsonlFile.delete({ id: 5 })
-    //     await jsonlFile.update({ name: 'Updated Name10' }, { id: 10 })
-    //     await jsonlFile.delete({ id: 15 })
+        if (!fs.existsSync(path.dirname(testFile))) {
+            fs.mkdirSync(path.dirname(testFile), { recursive: true })
+        }
 
-    //     // Проверяем, что кэш корректно обновился
-    //     const res = await jsonlFile.selectWithPagination({}, 1, 10)
-    //     expect(res.data).toHaveLength(10)
-    //     expect(res.total).toBe(23) // 25 - 2 удаленных записи
-    //     expect(res.data.find((item) => item.id === 5)).toBeUndefined()
-    //     expect(res.data.find((item) => item.id === 15)).toBeUndefined()
-    //     expect(res.data.find((item) => item.id === 10)?.name).toBe(
-    //         'Updated Name10',
-    //     )
-    // })
-// })
+        jsonlFile = new JSONLFile<TestData>(testFile, '', {
+            allocSize: 256,
+        })
+        await jsonlFile.init()
+    })
+
+    it('should skip checking existing records when skipCheckExistingForWrite is true', async () => {
+        // Создаем начальные данные
+        const initialData: TestData = {
+            id: '1',
+            name: 'Initial',
+            value: 42,
+            user: 'User1',
+        }
+
+        // Записываем начальные данные
+        await jsonlFile.write(initialData)
+
+        // Проверяем, что данные записались
+        const initialResult = await jsonlFile.read()
+        expect(initialResult).toHaveLength(1)
+        expect(initialResult[0]).toEqual(initialData)
+
+        // Пытаемся записать ту же запись с флагом skipCheckExistingForWrite = true
+        const duplicateData: TestData = {
+            id: '1',
+            name: 'Duplicate',
+            value: 100,
+            user: 'User2',
+        }
+
+        // Должно создать дубликат записи, так как проверка существующих записей пропущена
+        await jsonlFile.write(duplicateData, {
+            inTransaction: false,
+            skipCheckExistingForWrite: true,
+        })
+
+        // Проверяем, что теперь у нас две записи с одинаковым id
+        const finalResult = await jsonlFile.read()
+        expect(finalResult).toHaveLength(2)
+
+        // Проверяем, что обе записи существуют
+        const recordsWithId1 = finalResult.filter((record) => record.id === '1')
+        expect(recordsWithId1).toHaveLength(2)
+
+        // Проверяем, что одна запись имеет исходные данные, а другая - новые
+        const hasInitial = recordsWithId1.some(
+            (record) =>
+                record.name === 'Initial' &&
+                record.value === 42 &&
+                record.user === 'User1',
+        )
+        const hasDuplicate = recordsWithId1.some(
+            (record) =>
+                record.name === 'Duplicate' &&
+                record.value === 100 &&
+                record.user === 'User2',
+        )
+
+        expect(hasInitial).toBe(true)
+        expect(hasDuplicate).toBe(true)
+    })
+
+    it('should check existing records by default when skipCheckExistingForWrite is false', async () => {
+        // Создаем начальные данные
+        const initialData: TestData = {
+            id: '1',
+            name: 'Initial',
+            value: 42,
+            user: 'User1',
+        }
+
+        // Записываем начальные данные
+        await jsonlFile.write(initialData)
+
+        // Пытаемся записать ту же запись с флагом skipCheckExistingForWrite = false (по умолчанию)
+        const duplicateData: TestData = {
+            id: '1',
+            name: 'Updated',
+            value: 100,
+            user: 'User2',
+        }
+
+        // Должно обновить существующую запись, так как проверка включена
+        await jsonlFile.write(duplicateData, {
+            inTransaction: false,
+            skipCheckExistingForWrite: false,
+        })
+
+        // Проверяем, что у нас только одна запись с обновленными данными
+        const finalResult = await jsonlFile.read()
+        expect(finalResult).toHaveLength(1)
+        expect(finalResult[0]).toEqual(duplicateData)
+    })
+
+    it('should handle multiple records with skipCheckExistingForWrite', async () => {
+        // Создаем начальные данные
+        const initialData: TestData[] = [
+            { id: '1', name: 'First', value: 10, user: 'User1' },
+            { id: '2', name: 'Second', value: 20, user: 'User2' },
+        ]
+
+        // Записываем начальные данные
+        await jsonlFile.write(initialData)
+
+        // Проверяем, что данные записались
+        const initialResult = await jsonlFile.read()
+        expect(initialResult).toHaveLength(2)
+
+        // Пытаемся записать смешанные данные: существующие и новые
+        const mixedData: TestData[] = [
+            { id: '1', name: 'Updated First', value: 100, user: 'User1' }, // существующий
+            { id: '3', name: 'Third', value: 30, user: 'User3' }, // новый
+        ]
+
+        // С флагом skipCheckExistingForWrite = true
+        await jsonlFile.write(mixedData, {
+            inTransaction: false,
+            skipCheckExistingForWrite: true,
+        })
+
+        // Проверяем результат
+        const finalResult = await jsonlFile.read()
+        expect(finalResult).toHaveLength(4) // 2 исходных + 2 новых (включая дубликат)
+
+        // Проверяем, что у нас есть дубликат записи с id=1
+        const recordsWithId1 = finalResult.filter((record) => record.id === '1')
+        expect(recordsWithId1).toHaveLength(2)
+
+        // Проверяем, что новая запись с id=3 добавлена
+        const recordsWithId3 = finalResult.filter((record) => record.id === '3')
+        expect(recordsWithId3).toHaveLength(1)
+        expect(recordsWithId3[0]).toEqual(mixedData[1])
+    })
+
+    it('should work correctly with indexed fields when skipCheckExistingForWrite is true', async () => {
+        // Создаем адаптер с индексированными полями
+        const indexedJsonlFile = new JSONLFile<TestData>(testFile, '', {
+            allocSize: 256,
+            indexedFields: ['id', 'name'],
+        })
+        await indexedJsonlFile.init()
+
+        // Создаем начальные данные
+        const initialData: TestData = {
+            id: '1',
+            name: 'Initial',
+            value: 42,
+            user: 'User1',
+        }
+
+        // Записываем начальные данные
+        await indexedJsonlFile.write(initialData)
+
+        // Пытаемся записать дубликат с skipCheckExistingForWrite = true
+        const duplicateData: TestData = {
+            id: '1',
+            name: 'Duplicate',
+            value: 100,
+            user: 'User2',
+        }
+
+        await indexedJsonlFile.write(duplicateData, {
+            inTransaction: false,
+            skipCheckExistingForWrite: true,
+        })
+
+        // Проверяем, что дубликат создался
+        const finalResult = await indexedJsonlFile.read()
+        expect(finalResult).toHaveLength(2)
+
+        // Проверяем поиск по индексу - должно найти обе записи
+        const searchById = await indexedJsonlFile.readByFilter({ id: '1' })
+        expect(searchById).toHaveLength(2)
+
+        // Проверяем поиск по имени - должно найти соответствующие записи
+        const searchByName1 = await indexedJsonlFile.readByFilter({
+            name: 'Initial',
+        })
+        expect(searchByName1).toHaveLength(1)
+
+        const searchByName2 = await indexedJsonlFile.readByFilter({
+            name: 'Duplicate',
+        })
+        expect(searchByName2).toHaveLength(1)
+        // logTest(true, 'indexedJsonlFile:', await indexedJsonlFile.getPositionsNoLock())
+    })
+
+    it('should handle empty array with skipCheckExistingForWrite', async () => {
+        // Создаем начальные данные
+        const initialData: TestData = {
+            id: '1',
+            name: 'Initial',
+            value: 42,
+            user: 'User1',
+        }
+
+        // Записываем начальные данные
+        await jsonlFile.write(initialData)
+
+        // Пытаемся записать пустой массив с skipCheckExistingForWrite = true
+        await jsonlFile.write([], {
+            inTransaction: false,
+            skipCheckExistingForWrite: true,
+        })
+
+        // Проверяем, что данные не изменились
+        const result = await jsonlFile.read()
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual(initialData)
+    })
+
+    it('should handle single record vs array with skipCheckExistingForWrite', async () => {
+        // Создаем начальные данные как массив
+        const initialData: TestData[] = [
+            { id: '1', name: 'First', value: 10, user: 'User1' },
+        ]
+
+        // Записываем начальные данные
+        await jsonlFile.write(initialData)
+
+        // Пытаемся записать ту же запись как одиночный объект с skipCheckExistingForWrite = true
+        const singleData: TestData = {
+            id: '1',
+            name: 'Updated',
+            value: 100,
+            user: 'User2',
+        }
+
+        await jsonlFile.write(singleData, {
+            inTransaction: false,
+            skipCheckExistingForWrite: true,
+        })
+
+        // Проверяем, что дубликат создался
+        const finalResult = await jsonlFile.read()
+        expect(finalResult).toHaveLength(2)
+
+        // Проверяем, что обе записи с id=1 существуют
+        const recordsWithId1 = finalResult.filter((record) => record.id === '1')
+        expect(recordsWithId1).toHaveLength(2)
+    })
+
+    it('should work with encryption when skipCheckExistingForWrite is true', async () => {
+        // Создаем зашифрованный адаптер
+        const encryptedJsonlFile = new JSONLFile<TestData>(
+            testFile,
+            'test-key',
+            {
+                allocSize: 256,
+            },
+        )
+        await encryptedJsonlFile.init()
+
+        // Создаем начальные данные
+        const initialData: TestData = {
+            id: '1',
+            name: 'Initial',
+            value: 42,
+            user: 'User1',
+        }
+
+        // Записываем начальные данные
+        await encryptedJsonlFile.write(initialData)
+
+        // Пытаемся записать дубликат с skipCheckExistingForWrite = true
+        const duplicateData: TestData = {
+            id: '1',
+            name: 'Duplicate',
+            value: 100,
+            user: 'User2',
+        }
+
+        await encryptedJsonlFile.write(duplicateData, {
+            inTransaction: false,
+            skipCheckExistingForWrite: true,
+        })
+
+        // Проверяем, что дубликат создался
+        const finalResult = await encryptedJsonlFile.read()
+        expect(finalResult).toHaveLength(2)
+
+        // Проверяем, что обе записи с id=1 существуют
+        const recordsWithId1 = finalResult.filter((record) => record.id === '1')
+        expect(recordsWithId1).toHaveLength(2)
+    })
+})

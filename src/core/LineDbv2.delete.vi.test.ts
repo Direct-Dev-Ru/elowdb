@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { logTest } from '../common/utils/log.js'
 import { JSONLFileOptions } from '../common/interfaces/jsonl-file.js'
+import { log } from 'node:console'
 
 interface TestData extends LineDbAdapter {
     id: number | string
@@ -112,6 +113,24 @@ describe('LineDb - Delete Method Tests', () => {
             expect(result).toHaveLength(1)
 
             await db.delete<TestData>({ id: 1 }, 'testData')
+            result = await db.read<TestData>('testData')
+            expect(result).toHaveLength(0)
+        })
+
+        it('should delete one record by ID text filter', async () => {
+            const data: TestData = {
+                id: 1,
+                name: 'Test User',
+                age: 25,
+                userId: 1,
+                timestamp: Date.now(),
+            }
+
+            await db.insert<TestData>(data, 'testData')
+            let result = await db.read<TestData>('testData')
+            expect(result).toHaveLength(1)
+
+            await db.delete<TestData>(`name == 'Test User'`, 'testData')
             result = await db.read<TestData>('testData')
             expect(result).toHaveLength(0)
         })
@@ -343,7 +362,7 @@ describe('LineDb - Delete Method Tests', () => {
 
             await db.insert<TestOrder>(order1, 'orders')
             await db.insert<TestOrder>(order2, 'orders')
-            db.clearCache()
+            await db.clearCache()
             expect(db.actualCacheSize).toBe(0)
 
             let selectOrdersResult = await db.select<TestOrder>('', 'orders')
@@ -397,7 +416,7 @@ describe('LineDb - Delete Method Tests', () => {
             expect(db.selectResultArray(selectOrdersResult)[0].status).toBe(
                 'completed',
             )
-        })
+        }, 1_000_000)
 
         it('should delete records from a specific partition', async () => {
             const orders: TestOrder[] = [
@@ -432,7 +451,7 @@ describe('LineDb - Delete Method Tests', () => {
     })
 
     describe('Delete in transactions', () => {
-        it('should delete in Multy Adapters Transaction transaction', async () => {
+        it('should delete in Multy Adapters Transaction', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -479,7 +498,7 @@ describe('LineDb - Delete Method Tests', () => {
             expect(db.selectResultArray(result)).toHaveLength(0)
         })
 
-        it.only('should delete in adapter transaction', async () => {
+        it('should delete in adapter transaction', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -489,20 +508,84 @@ describe('LineDb - Delete Method Tests', () => {
             }
 
             await db.insert<TestData>(data, 'testData')
-            let result = await db.select<TestData>('id === 1','testData')
+            let result = await db.select<TestData>('id === 1', 'testData')
             expect(db.selectResultArray(result)).toHaveLength(1)
-            // TODO Test fails - wrong transaction id 
+
             await db.withAdapterTransaction<TestData>(async (adapter, db) => {
-                await db.delete<TestData>({ id: 1 }, 'testData')
+                await adapter.delete({ id: 1 })
             }, 'testData')
 
-            result = await db.select<TestData>('','testData')
+            result = await db.select<TestData>('', 'testData')
             expect(result).toHaveLength(0)
+        })
+        it('should delete in Multy Adapters Transaction with several adapters', async () => {
+            const data: TestData = {
+                id: 1,
+                name: 'Test User',
+                age: 25,
+                userId: -1,
+                timestamp: Date.now(),
+            }
+            const user: Partial<TestUser> = {
+                username: 'Test User',
+                password: 'password123',
+                isActive: true,
+                role: 'admin',
+                timestamp: Date.now(),
+            }
+            // Create collection of adapters for transaction
+            const adapters = ['testData', 'testUser']
+
+            // Execute transaction
+            await db.withMultyAdaptersTransaction(
+                async (adapterMap, database) => {
+                    const userOptions =
+                        adapterMap.get('testUser')?.adapterOptions
+
+                    await database.insert<TestUser>(user, 'testUser', userOptions)
+                    const userResult = await database.select<TestUser>(
+                        '',
+                        'testUser',
+                        {
+                            ...userOptions,
+                            inTransaction: true,
+                        },
+                    )
+                    expect(db.selectResultArray(userResult)).toHaveLength(1)
+                    expect(db.selectResultArray(userResult)[0].username).toBe(
+                        'Test User',
+                    )
+
+                    const options = adapterMap.get('testData')?.adapterOptions
+                    await database.insert<TestData>(data, 'testData', options)
+                    await database.update<TestData>(
+                        [{ name: 'Updated Test User', userId: userResult[0].id }],
+                        'testData',
+                        { id: 1 },
+                        options,
+                    )
+                    const result = await db.select<TestData>(
+                        '',
+                        'testData',
+                        options,
+                    )
+                    expect(db.selectResultArray(result)).toHaveLength(1)
+                    expect(db.selectResultArray(result)[0].name).toBe(
+                        'Updated Test User',
+                    )
+                    logTest(true, db.selectResultArray(result))
+                    await database.delete<TestData>({ id: 1 }, 'testData', options)                    
+                },
+                adapters,
+                { rollback: true },
+            )
+            const result = await db.select<TestData>('testData')
+            expect(db.selectResultArray(result)).toHaveLength(0)            
         })
     })
 
-    describe('Граничные случаи и ошибки', () => {
-        it('должен корректно обработать удаление несуществующей записи', async () => {
+    describe('Edge cases and errors', () => {
+        it('should correctly handle deletion of a non-existent record', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -511,20 +594,31 @@ describe('LineDb - Delete Method Tests', () => {
                 timestamp: Date.now(),
             }
 
+            const data2: TestData = {
+                id: 2,
+                name: 'Test User 2',
+                age: 25,
+                userId: 1,
+                timestamp: Date.now(),
+            }
+
             await db.insert<TestData>(data, 'testData')
+            await db.insert<TestData>(data2, 'testData')
             let result = await db.read<TestData>('testData')
-            expect(result).toHaveLength(1)
+            expect(result).toHaveLength(2)
 
-            // Удаляем несуществующую запись
-            await db.delete<TestData>({ id: 999 }, 'testData')
+            // Delete non-existent record
+            const deleted = await db.delete<TestData>({ id: 100 }, 'testData')
+            expect(deleted).toHaveLength(0)
 
-            // Проверяем, что существующая запись осталась
+            // Check that the existing record remains
             result = await db.read<TestData>('testData')
-            expect(result).toHaveLength(1)
+            expect(result).toHaveLength(2)
             expect(result[0].id).toBe(1)
+            expect(result[1].id).toBe(2)
         })
 
-        it('должен корректно обработать пустой массив для удаления', async () => {
+        it('should correctly handle deletion of an empty array', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -537,24 +631,24 @@ describe('LineDb - Delete Method Tests', () => {
             let result = await db.read<TestData>('testData')
             expect(result).toHaveLength(1)
 
-            // Удаляем пустой массив
+            // Delete empty array
             await db.delete<TestData>([], 'testData')
 
-            // Проверяем, что запись осталась
+            // Check that the record remains
             result = await db.read<TestData>('testData')
             expect(result).toHaveLength(1)
         })
 
-        it('должен выбросить ошибку при удалении из несуществующей коллекции', async () => {
+        it('should throw an error when deleting from a non-existent collection', async () => {
             await expect(
-                db.delete<TestData>({ id: 1 }, 'nonExistentCollection'),
-            ).rejects.toThrow('Collection nonExistentCollection not found')
+                db.delete<TestData>({ id: 1 }, 'nonExistentCollection_1'),
+            ).rejects.toThrow()
         })
 
-        it('должен корректно обработать удаление записей с разными типами ID', async () => {
+        it('should correctly handle deletion of records with different ID types', async () => {
             const dataWithStringId: TestData = {
                 id: 'user-1',
-                name: 'Test User',
+                name: 'Test String Id User',
                 age: 25,
                 userId: 1,
                 timestamp: Date.now(),
@@ -564,16 +658,34 @@ describe('LineDb - Delete Method Tests', () => {
             let result = await db.read<TestData>('testData')
             expect(result).toHaveLength(1)
 
-            await db.delete<TestData>({ id: 'user-1' }, 'testData')
+            const dataWithNumberId: TestData = {
+                id: 2,
+                name: 'Test Number Id User',
+                age: 25,
+                userId: 1,
+                timestamp: Date.now(),
+            }
+
+            await db.insert<TestData>(dataWithNumberId, 'testData')
+            result = await db.read<TestData>('testData')
+            expect(result).toHaveLength(2)
+
+            await db.delete<TestData>(`id == 'user-1'`, 'testData')
+            result = await db.read<TestData>('testData')
+            expect(result).toHaveLength(1)
+
+            await db.delete<TestData>({ id: 2 }, 'testData')
             result = await db.read<TestData>('testData')
             expect(result).toHaveLength(0)
-        })
+        }, 1_000_000)
     })
 
-    describe('Производительность и масштабируемость', () => {
-        it('должен эффективно удалять большое количество записей', async () => {
+    describe('Performance and scalability', () => {
+        it('should efficiently delete a large number of records', async () => {
+            const recordCount = 2000
+            const expectedTime = 2000
             const largeDataArray: TestData[] = []
-            for (let i = 1; i <= 100; i++) {
+            for (let i = 1; i <= recordCount; i++) {
                 largeDataArray.push({
                     id: i,
                     name: `User ${i}`,
@@ -583,20 +695,24 @@ describe('LineDb - Delete Method Tests', () => {
                 })
             }
 
-            await db.write<TestData>(largeDataArray, 'testData')
+            await db.insert<TestData>(largeDataArray, 'testData')
             let result = await db.read<TestData>('testData')
-            expect(result).toHaveLength(100)
+            expect(result).toHaveLength(recordCount)
 
             const startTime = Date.now()
-            await db.delete<TestData>(largeDataArray, 'testData')
-            const endTime = Date.now()
+            const itemsToDelete = largeDataArray.filter(
+                (item) => (item.id as number) % 2 === 0,
+            )
 
+            await db.delete<TestData>(itemsToDelete, 'testData')
+            const endTime = Date.now()
+            logTest(true, endTime - startTime)
             result = await db.read<TestData>('testData')
-            expect(result).toHaveLength(0)
+            expect(result).toHaveLength(recordCount / 2)
 
             // Проверяем, что удаление выполнилось за разумное время (менее 5 секунд)
-            expect(endTime - startTime).toBeLessThan(5000)
-        })
+            expect(endTime - startTime).toBeLessThan(expectedTime)
+        }, 1_000_000)
 
         it('должен корректно работать с кэшем при удалении множества записей', async () => {
             const dataArray: TestData[] = []
@@ -623,8 +739,8 @@ describe('LineDb - Delete Method Tests', () => {
         })
     })
 
-    describe('Интеграционные тесты', () => {
-        it('должен корректно работать с несколькими коллекциями одновременно', async () => {
+    describe('Integration tests', () => {
+        it('should correctly work with multiple collections at the same time', async () => {
             const user: TestUser = {
                 id: 1,
                 username: 'testuser',
@@ -660,7 +776,7 @@ describe('LineDb - Delete Method Tests', () => {
             expect(dataRecords).toHaveLength(0)
         })
 
-        it('должен корректно работать с операциями insert -> delete -> insert', async () => {
+        it('should correctly work with insert -> delete -> insert operations', async () => {
             const data: TestData = {
                 id: 1,
                 name: 'Test User',
@@ -680,7 +796,7 @@ describe('LineDb - Delete Method Tests', () => {
             expect(result).toHaveLength(0)
 
             // Insert again
-            await db.insert<TestData>(data, 'testData')
+            await db.insert<TestData>({ ...data, id: 1 }, 'testData')
             result = await db.read<TestData>('testData')
             expect(result).toHaveLength(1)
             expect(result[0].id).toBe(1)

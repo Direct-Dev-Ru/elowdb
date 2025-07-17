@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+import { LineDbAdapterOptions } from '../interfaces/jsonl-file'
+
 /**
  * Парсит строку фильтра в объект
  * Поддерживает форматы: field1 == value1 and field2 == value2
@@ -240,3 +245,33 @@ export function extractOperators(filterString: string): string[] {
 
     return operators
 }
+
+export const defaultFilterData =
+    <T>(filterData: Partial<T>, options?: LineDbAdapterOptions) =>
+    (record: Partial<T>) => {
+        return Object.entries(filterData).every(([key, value]) => {
+            const recordValue = record[key as keyof T]
+            if (key === 'id') {
+                // Пытаемся преобразовать recordValue к числу
+                const recordValueNum = Number(recordValue)
+                const valueNum = Number(value)
+                const bothAreNumbers =
+                    !isNaN(recordValueNum) && !isNaN(valueNum)
+                if (bothAreNumbers) {
+                    return recordValueNum === valueNum
+                }
+                const strValue = String(value).trim()
+                const strRecordValue = String(recordValue).toString().trim()
+                return strRecordValue === strValue
+            }
+
+            if (
+                typeof value === 'string' &&
+                typeof recordValue === 'string' &&
+                options?.strictCompare == false
+            ) {
+                return recordValue.toLowerCase().includes(value.toLowerCase())
+            }
+            return recordValue === value
+        })
+    }

@@ -47,11 +47,22 @@ export interface LineDbAdapter {
 }
 
 export interface LineDbAdapterOptions {
-    inTransaction: boolean
+    inTransaction?: boolean
     transactionId?: string
     debugTag?: string
     strictCompare?: boolean
     filterType?: 'sift' | 'mongodb' | 'string' | 'filtrex' | 'object' | 'base'
+    method?:
+        | 'insert'
+        | 'update'
+        | 'delete'
+        | 'select'
+        | 'write'
+        | 'readByFilter'
+        | 'all'
+    repeatCount?: number
+    internalCall?: boolean // if true, then call is internal, not from user
+    skipCheckExistingForWrite?: boolean // if true, then skip check existing for write - always append to file
 }
 
 export interface AdapterLine<T extends LineDbAdapter> {

@@ -23,6 +23,7 @@ import {
     FilterFunction,
     JSONLFileOptions,
     LineDbAdapterOptions,
+    PaginatedResult,
 } from '../common/interfaces/jsonl-file.js'
 import {
     BackupMetaData,
@@ -173,7 +174,7 @@ export class LineDb {
     #partitionFunctions: Map<string, (item: Partial<unknown>) => string> =
         new Map()
     #mutex: RWMutex = new RWMutex()
-    #cache: Map<string, CacheEntry<unknown>> | undefined
+    // #cache: Map<string, CacheEntry<unknown>> | undefined
     #cacheSize: number = 1000
     #cacheExternal: RecordCache<unknown> | undefined
     #nextIdFn: (
@@ -324,7 +325,7 @@ export class LineDb {
                       enableLogging: false,
                   })
                 : undefined
-        this.#cache = this.#cacheExternal ? undefined : new Map()
+
         this.#nextIdFn =
             this.#constructorOptions?.nextIdFn || this.#defaultNextIdFn
         this.#cacheTTL = this.#constructorOptions.cacheTTL || 0
@@ -363,7 +364,7 @@ export class LineDb {
         this.#adapters.clear()
         this.#collections.clear()
         this.#partitionFunctions.clear()
-        this.#cache?.clear()
+
         this.#cacheExternal?.clear()
         this.#cacheSize = 0
     }
@@ -494,7 +495,6 @@ export class LineDb {
                           enableLogging: false,
                       })
                     : undefined
-            this.#cache = this.#cacheExternal ? undefined : new Map()
             this.#nextIdFn = initOptions?.nextIdFn || defaultNextIdFn
             this.#lastIdManager = LastIdManager.getInstance()
         }
@@ -502,6 +502,9 @@ export class LineDb {
         if (initOptions) {
             dbFolder =
                 initOptions?.dbFolder ?? path.join(process.cwd(), 'linedb')
+            if (!fsClassic.existsSync(dbFolder)) {
+                await fs.mkdir(dbFolder, { recursive: true })
+            }
             this.#initOptions = {
                 ...(initOptions || {}),
                 dbFolder,
@@ -511,20 +514,27 @@ export class LineDb {
             this.#nextIdFn =
                 this.#initOptions?.nextIdFn || this.#defaultNextIdFn
 
-            if (!fsClassic.existsSync(dbFolder)) {
-                await fs.mkdir(dbFolder, { recursive: true })
-            }
-            // Save partition functions
-            for (const partition of initOptions?.partitions || []) {
+            // Save partition functions to collection
+            // for (const partition of this.#initOptions?.partitions || []) {
+            for (
+                let partIdx = 0;
+                partIdx < (this.#initOptions?.partitions || []).length;
+                partIdx++
+            ) {
+                const partition = (this.#initOptions?.partitions || [])[partIdx]
+
                 this.#partitionFunctions.set(
                     partition.collectionName,
                     this.#parsePartitionFunction(partition.partIdFn),
                 )
+                if (!partition.mutex) {
+                    partition.mutex = new RWMutex()
+                }
             }
-            this.#initOptions = initOptions
+            // this.#initOptions = initOptions
             let i = 0
 
-            for (const adapterOptions of initOptions.collections) {
+            for (const adapterOptions of this.#initOptions.collections) {
                 i++
                 const resultCollectionName =
                     adapterOptions?.collectionName || `collection_${i}`
@@ -635,9 +645,7 @@ export class LineDb {
     }
 
     get actualCacheSize(): number {
-        return this.#cacheExternal
-            ? this.#cacheExternal?.size() || 0
-            : this.#cache?.size || 0
+        return this.#cacheExternal ? this.#cacheExternal?.size() || 0 : 0
     }
     get limitCacheSize(): number {
         return this.#cacheSize
@@ -645,7 +653,7 @@ export class LineDb {
     get cacheMap(): Map<string | number, CacheEntry<unknown>> {
         return this.#cacheExternal
             ? this.#cacheExternal.getFlatCacheMap()
-            : this.#cache || new Map()
+            : new Map()
     }
 
     public get firstCollection(): string {
@@ -789,47 +797,18 @@ export class LineDb {
             }
 
             const payload = async () => {
-                const now = Date.now()
-
                 // Check cache by id of presented record
                 if (typeof data === 'object' && data.id) {
                     const cacheKey = `${collectionName}:${data.id}`
-                    let entry: CacheEntry<T> | undefined
-                    if (this.#cacheExternal) {
-                        if (this.#cacheExternal.has(cacheKey)) {
-                            entry = this.#cacheExternal.get(
-                                cacheKey,
-                            ) as CacheEntry<T>
-                        }
-                    } else if (this.#cache?.has(cacheKey)) {
-                        entry = this.#cache.get(cacheKey) as CacheEntry<T>
-                    }
-                    // Check if record in cache is expired
-                    if (
-                        this.#cacheTTL &&
-                        entry &&
-                        now - entry.lastAccess > this.#cacheTTL
-                    ) {
-                        // Record is expired, delete it from cache
-                        if (this.#cacheExternal) {
-                            this.#cacheExternal.delete(cacheKey)
-                        } else {
-                            this.#cache?.delete(cacheKey)
-                        }
-                        logTest(
-                            logForTest,
-                            `Cache entry expired for ${cacheKey}`,
-                        )
-                    } else {
-                        // Record is actual, update access time and return it
-                        if (entry) {
-                            entry.lastAccess = now
+                    if (this.#cacheExternal?.has(cacheKey)) {
+                        const entryExternal = this.#cacheExternal.get(cacheKey)
+                        if (entryExternal) {
                             logTest(logForTest, `Cache hit for ${cacheKey}`)
-                            return [entry.data]
+                            return [entryExternal]
                         }
                     }
                 }
-                // Read by filter
+                // No cache hit - Read by filter from disk
                 const results = await adapter.readByFilter(data, {
                     ...options,
                     inTransaction:
@@ -845,14 +824,15 @@ export class LineDb {
             }
 
             if (this.#inTransaction || options?.inTransaction) {
-                return await payload()
+                return (await payload()) as T[]
             }
-            return await this.#mutex.withReadLock(payload)
+            return (await this.#mutex.withReadLock(payload)) as T[]
         }
 
         // if partition function exists, read from all partitions or only from one
         // if optimistic read or partition name is presented
         // or if partition name is presented in parameter
+        // TODO: maybe better to do atomic read from all partitions and then update cache
         const partitionNameFromParameter =
             splitOfCollectionName.length > 1
                 ? splitOfCollectionName[splitOfCollectionName.length - 1]
@@ -878,9 +858,8 @@ export class LineDb {
             } else if (partitionNameFromParameter) {
                 condition = key === collectionName
             } else {
-                condition = key.startsWith(`${collectionName}`)
+                condition = key.startsWith(collectionName)
             }
-
             if (condition) {
                 const adapter = partitionAdapter as JSONLFile<T>
 
@@ -893,8 +872,16 @@ export class LineDb {
             }
         }
         // Update cache
-        for (const item of results) {
-            this.#updateCache(item, collectionName)
+        if (this.#cacheExternal) {
+            const cachePayload = async () => {
+                for (const item of results) {
+                    this.#updateCache(item, collectionName as string)
+                }
+            }
+            if (this.#inTransaction || options?.inTransaction) {
+                await cachePayload()
+            }
+            await this.#mutex.withWriteLock(cachePayload)
         }
         return results
     }
@@ -902,7 +889,10 @@ export class LineDb {
     async write<T extends LineDbAdapter>(
         data: T | T[] | Partial<T> | Partial<T>[],
         collectionName?: string,
-        options: { inTransaction: boolean } = { inTransaction: false },
+        options: {
+            inTransaction: boolean
+            wrappedCall?: boolean
+        } = { inTransaction: false, wrappedCall: false },
     ): Promise<void> {
         if (!collectionName) {
             collectionName = this.firstCollection
@@ -911,21 +901,30 @@ export class LineDb {
         const dataArray = Array.isArray(data) ? data : [data]
         const adapters = new Map<string, T[]>()
 
-        // Группируем данные по партициям
-        for (const item of dataArray) {
-            const adapter = await this.getPartitionAdapter<T>(
-                item as T,
+        let adapter: JSONLFile<T> | undefined
+        if (this.#isCollectionPartitioned(collectionName)) {
+            for await (const item of dataArray) {
+                adapter = await this.getPartitionAdapter<T>(
+                    item as T,
+                    collectionName,
+                )
+                const adapterKey = adapter.getCollectionName()
+
+                if (!adapters.has(adapterKey)) {
+                    adapters.set(adapterKey, [])
+                }
+                adapters.get(adapterKey)!.push(item as T)
+            }
+        } else {
+            adapter = await this.getPartitionAdapter<T>(
+                dataArray[0] as unknown as T,
                 collectionName,
             )
             const adapterKey = adapter.getCollectionName()
-
-            if (!adapters.has(adapterKey)) {
-                adapters.set(adapterKey, [])
-            }
-            adapters.get(adapterKey)!.push(item as T)
+            adapters.set(adapterKey, dataArray as T[])
         }
 
-        // Записываем данные в соответствующие партиции
+        // Write data to corresponding partitions
         for (const [adapterKey, items] of adapters) {
             const adapter = this.#adapters.get(adapterKey) as JSONLFile<T>
             if (!adapter) {
@@ -939,14 +938,33 @@ export class LineDb {
 
             // Set LastId if it has number type and using default function
             // Refresh cache
-            for (const item of items) {
-                this.#updateCache(item, adapterKey)
-                if (this.#isDefaultNextIdFn() && typeof item.id === 'number') {
-                    const currentId =
-                        await this.#lastIdManager.getLastId(adapterKey)
-                    if (item.id > currentId || 0) {
-                        await this.#lastIdManager.setLastId(adapterKey, item.id)
+            if (this.#cacheExternal) {
+                const cachePayload = async () => {
+                    for (const item of items) {
+                        this.#updateCache(item, adapterKey)
+                        if (
+                            this.#isDefaultNextIdFn() &&
+                            typeof item.id === 'number'
+                        ) {
+                            const currentId =
+                                await this.#lastIdManager.getLastId(adapterKey)
+                            if (item.id > currentId || 0) {
+                                await this.#lastIdManager.setLastId(
+                                    adapterKey,
+                                    item.id,
+                                )
+                            }
+                        }
                     }
+                }
+                if (
+                    this.#inTransaction ||
+                    options.inTransaction ||
+                    options.wrappedCall
+                ) {
+                    await cachePayload()
+                } else {
+                    await this.#mutex.withWriteLock(cachePayload)
                 }
             }
         }
@@ -955,7 +973,14 @@ export class LineDb {
     async insert<T extends LineDbAdapter>(
         data: T | T[] | Partial<T> | Partial<T>[],
         collectionName?: string,
-        options: { inTransaction: boolean } = { inTransaction: false },
+        options: {
+            inTransaction: boolean
+            debugTag?: string
+            skipCheckExistingForWrite?: boolean
+        } = {
+            inTransaction: false,
+            skipCheckExistingForWrite: false,
+        },
     ): Promise<void> {
         if (!collectionName) {
             collectionName = this.firstCollection
@@ -965,6 +990,9 @@ export class LineDb {
             const dataArray = Array.isArray(data) ? data : [data]
             const resultDataArray: Partial<T>[] = []
             for (const item of dataArray) {
+                if (options.debugTag === 'error') {
+                    throw new Error('test error')
+                }
                 // Generate id for new records if omit
                 if (!item.id || Number(item.id) <= -1) {
                     let done = false
@@ -984,23 +1012,25 @@ export class LineDb {
                             )
                         }
                     }
-                    resultDataArray.push({ ...item, id: newId })
+                    resultDataArray.push({ id: newId, ...item })
                 } else {
                     // Check if record does not exist
-                    const filter = { id: item.id } as Partial<T>
+                    if (!(options?.skipCheckExistingForWrite || false)) {
+                        const filter = { id: item.id } as Partial<T>
 
-                    for (const [key, partitionAdapter] of this.#adapters) {
-                        if (key.includes(collectionName)) {
-                            const exists = await (
-                                partitionAdapter as JSONLFile<LineDbAdapter>
-                            ).readByFilter(filter, {
-                                ...options,
-                                inTransaction: true,
-                            })
-                            if (exists.length > 0) {
-                                throw new Error(
-                                    `Record with id ${item.id} already exists in collection ${collectionName}`,
-                                )
+                        for (const [key, partitionAdapter] of this.#adapters) {
+                            if (key.includes(collectionName as string)) {
+                                const exists = await (
+                                    partitionAdapter as JSONLFile<LineDbAdapter>
+                                ).readByFilter(filter, {
+                                    ...options,
+                                    inTransaction: true,
+                                })
+                                if (exists.length > 0) {
+                                    throw new Error(
+                                        `Record with id ${item.id} already exists in collection ${collectionName}`,
+                                    )
+                                }
                             }
                         }
                     }
@@ -1011,7 +1041,18 @@ export class LineDb {
             await this.write(resultDataArray, collectionName, {
                 ...options,
                 inTransaction: true,
+                wrappedCall: true,
             })
+
+            // update cache after insert
+            if (this.#cacheExternal) {
+                for (const item of resultDataArray) {
+                    await this.#cacheExternal.updateCacheAfterInsert(
+                        item as T,
+                        collectionName as string,
+                    )
+                }
+            }
         }
         if (this.#inTransaction || options.inTransaction) {
             return await payload()
@@ -1118,7 +1159,6 @@ export class LineDb {
                     }
                 } catch {
                     // if error, clear cache
-                    this.#cache?.clear()
                     this.#cacheExternal?.clear()
                 }
                 return updatedItems
@@ -1131,10 +1171,11 @@ export class LineDb {
         }
 
         // if partition function exists, read from all partitions and collect data to map
-        const updatedData: Map<
-            { oldPartition: string; newPartition: string },
-            T[]
-        > = new Map()
+        const updatedData: Map<string, T[]> = new Map()
+        // const updatedData: Map<
+        //     { oldPartition: string; newPartition: string },
+        //     T[]
+        // > = new Map()
         const dataArray = Array.isArray(data) ? data : [data]
         for (const [key, partitionAdapter] of this.#adapters) {
             if (key.includes(collectionName)) {
@@ -1151,21 +1192,20 @@ export class LineDb {
                     if (results.length > 0) {
                         for (const result of results) {
                             const updatedItem = { ...result, ...item } as T
-                            const newPartition = partitionFn(updatedItem)
-                            const existingUpdatedItems = updatedData.get({
+                            let newPartition = partitionFn(updatedItem)
+                            const baseCollectionName = key.split('_')[0]
+                            if (!newPartition.includes(baseCollectionName)) {
+                                newPartition = `${collectionName}_${newPartition}`
+                            }
+                            const mapKey = JSON.stringify({
                                 oldPartition: key,
                                 newPartition,
                             })
+                            const existingUpdatedItems = updatedData.get(mapKey)
                             if (existingUpdatedItems) {
                                 existingUpdatedItems.push(updatedItem)
                             } else {
-                                updatedData.set(
-                                    {
-                                        oldPartition: key,
-                                        newPartition,
-                                    },
-                                    [updatedItem],
-                                )
+                                updatedData.set(mapKey, [updatedItem])
                             }
                         }
                     }
@@ -1179,38 +1219,75 @@ export class LineDb {
             if (items.length === 0) {
                 continue
             }
-            if (key.oldPartition === key.newPartition) {
+            const objectKey = JSON.parse(key)
+            if (objectKey.oldPartition === objectKey.newPartition) {
                 const adapter = this.#adapters.get(
-                    key.oldPartition,
+                    objectKey.oldPartition,
                 ) as JSONLFile<T>
+                // adapter update method returns updated items
                 const currentUpdatedItems = await adapter.update(items, '', {
                     ...options,
                     inTransaction: this.#inTransaction || options.inTransaction,
                 })
                 updatedItems = [...updatedItems, ...currentUpdatedItems]
             } else {
-                const oldAdapter = this.#adapters.get(
-                    key.oldPartition,
-                ) as JSONLFile<T>
-                let newAdapter = this.#adapters.get(
-                    key.newPartition,
-                ) as JSONLFile<T>
-                if (!newAdapter) {
-                    newAdapter = await this.getPartitionAdapter<T>(
-                        items[0],
-                        key.oldPartition.split('_')[0],
+                const baseCollectionName = objectKey.oldPartition.split('_')[0]
+                const partitionMutex = this.#initOptions?.partitions?.find(
+                    (partition) =>
+                        partition.collectionName === baseCollectionName,
+                )?.mutex
+                if (partitionMutex) {
+                    await partitionMutex.withWriteLock(async () => {
+                        await this.withMultyAdaptersTransaction(
+                            async (
+                                adapters: Map<
+                                    string,
+                                    {
+                                        adapter: JSONLFile<LineDbAdapter>
+                                        adapterOptions: LineDbAdapterOptions
+                                    }
+                                >,
+                            ) => {
+                                logTest(
+                                    true,
+                                    'withMultyAdaptersTransaction inner callback ...',
+                                )
+                                const oldAdapterObject = adapters.get(
+                                    objectKey.oldPartition as string,
+                                )
+                                const oldAdapter =
+                                    oldAdapterObject?.adapter as unknown as JSONLFile<T>
+
+                                await oldAdapter.delete(items)
+                                const newAdapterObject = adapters.get(
+                                    objectKey.newPartition as string,
+                                )
+                                const newAdapter =
+                                    newAdapterObject?.adapter as unknown as JSONLFile<T>
+
+                                const currentUpdatedItems =
+                                    await newAdapter.insert(items)
+
+                                updatedItems = [
+                                    ...updatedItems,
+                                    ...(currentUpdatedItems ?? []),
+                                ]
+                                // throw new Error('test error')
+                            },
+                            [
+                                objectKey.oldPartition as string,
+                                objectKey.newPartition as string,
+                            ],
+                            {
+                                rollback: true,
+                            },
+                        )
+                    })
+                } else {
+                    throw new Error(
+                        `Partition mutex for collection ${baseCollectionName} not found`,
                     )
                 }
-                const currentUpdatedItems = await newAdapter.insert(items, {
-                    ...options,
-                    inTransaction: this.#inTransaction || options.inTransaction,
-                })
-                // delete in old partition
-                await oldAdapter.delete(items, {
-                    ...options,
-                    inTransaction: this.#inTransaction || options.inTransaction,
-                })
-                updatedItems = [...updatedItems, ...currentUpdatedItems]
             }
         }
         return updatedItems
@@ -1227,7 +1304,65 @@ export class LineDb {
         if (!collectionName) {
             collectionName = this.firstCollection
         }
+        if (!this.#adapters.has(collectionName.split('_')[0])) {
+            throw new Error(`Collection ${collectionName} not found`)
+        }
+        const dataLength = Array.isArray(data) ? data.length : 1
+        if (
+            (typeof data !== 'string' &&
+                (data == null ||
+                    Object.keys(data).length === 0 ||
+                    dataLength === 0)) ||
+            (typeof data === 'string' && data === '')
+        ) {
+            return []
+        }
 
+        if (typeof data !== 'string' && dataLength > 1) {
+            // Analyze input array for duplicates by id, then by all fields for records without id
+            const arr = Array.isArray(data) ? data : [data]
+
+            // First, find duplicates by id
+            const seenIds = new Set()
+            const uniqueById: Partial<T>[] = []
+            const noIdItems: Partial<T>[] = []
+
+            for (const item of arr) {
+                if (
+                    item &&
+                    'id' in item &&
+                    item.id !== undefined &&
+                    item.id !== null
+                ) {
+                    if (!seenIds.has(item.id)) {
+                        seenIds.add(item.id)
+                        uniqueById.push(item)
+                    }
+                } else {
+                    noIdItems.push(item)
+                }
+            }
+
+            // Now find duplicates among records without id by all fields
+            const uniqueNoIdItems: Partial<T>[] = []
+            const seenNoId = new Set<string>()
+            for (const item of noIdItems) {
+                // String-key based on all fields of the object
+                const key = JSON.stringify(item, Object.keys(item).sort())
+                if (!seenNoId.has(key)) {
+                    seenNoId.add(key)
+                    uniqueNoIdItems.push(item)
+                }
+            }
+
+            // Combine unique records
+            const uniqueItems = [...uniqueById, ...uniqueNoIdItems]
+
+            // Pass only unique records further
+            data = uniqueItems
+        }
+
+        // delete method payload code
         const payload = async () => {
             const filter =
                 typeof data === 'string'
@@ -1238,7 +1373,7 @@ export class LineDb {
             const adapters = await this.getCollectionAdapters(collectionName)
             const deletedRecords: Partial<LineDbAdapter>[] = []
             for (const [key, adapter] of adapters.entries()) {
-                if (key.includes(collectionName)) {
+                if (key.includes(collectionName as string)) {
                     const deleted = await adapter.delete(filter, {
                         ...options,
                         inTransaction:
@@ -1250,55 +1385,45 @@ export class LineDb {
                 }
             }
 
-            // Очищаем кэш для удаленных записей
+            // Clear cache for deleted records
             for (const item of deletedRecords) {
                 if (item.id) {
                     const cacheKey = `${collectionName}:${item.id}`
                     if (this.#cacheExternal) {
                         this.#cacheExternal.delete(cacheKey)
-                    } else if (this.#cache) {
-                        this.#cache.delete(cacheKey)
                     }
                 }
             }
             return deletedRecords
         }
+
         if (this.#inTransaction || options.inTransaction) {
             return await payload()
         }
         return await this.#mutex.withWriteLock(payload)
     }
 
-    async clearCache(collectionName?: string): Promise<void> {
-        if (collectionName) {
-            if (this.#cacheExternal) {
-                this.#cacheExternal.clear()
-            } else if (this.#cache) {
-                for (const [key, entry] of this.#cache.entries()) {
-                    if (entry.collectionName === collectionName) {
-                        this.#cache.delete(key)
-                    }
-                }
-            }
-        } else if (this.#cacheExternal) {
-            this.#cacheExternal.clear()
-        } else if (this.#cache) {
-            this.#cache.clear()
+    async clearCache(
+        collectionName?: string,
+        options: { inTransaction: boolean } = { inTransaction: false },
+    ): Promise<void> {
+        if (!this.#cacheExternal) {
+            return
         }
-    }
-
-    async #getInternalCacheStats(): Promise<{
-        hits: number
-        misses: number
-        size: number
-        hitRate: number
-    }> {
-        const hits = 0
-        const misses = 0
-        const size = this.#cache?.size || 0
-        const hitRate = size > 0 ? hits / size : 0
-
-        return { hits, misses, size, hitRate }
+        const payload = async () => {
+            if (collectionName && this.#cacheExternal) {
+                this.#cacheExternal.clear(collectionName)
+            } else if (this.#cacheExternal) {
+                this.#cacheExternal.clear()
+            }
+            return
+        }
+        if (this.#inTransaction || options.inTransaction) {
+            return await payload()
+        }
+        const mutexLocal = this.#mutex || globalLineDbMutex
+        return await mutexLocal.withWriteLock(payload)
+        // return await payload()
     }
 
     #updateCache<T extends LineDbAdapter>(
@@ -1309,139 +1434,11 @@ export class LineDb {
         if (this.#cacheTTL && this.#cacheTTL <= 0) {
             return
         }
-        const now = Date.now()
-        const cacheKey = `${collectionName}:${item.id}`
 
         if (this.#cacheExternal) {
             this.#cacheExternal.setByRecord(item, collectionName)
             return
         }
-
-        // Если запись с таким ID уже есть в кэше, проверяем её актуальность
-        if (this.#cache?.has(cacheKey)) {
-            const cachedEntry = this.#cache.get(cacheKey)!
-
-            // Проверяем TTL
-            if (
-                this.#cacheTTL &&
-                now - cachedEntry.lastAccess > this.#cacheTTL
-            ) {
-                // Запись устарела, удаляем её
-                this.#cache.delete(cacheKey)
-                logTest(
-                    logForTest,
-                    `Cache entry expired during update for ${cacheKey}`,
-                )
-            } else {
-                const cachedEntryData = cachedEntry.data as T
-                // Проверяем наличие поля timestamp и его значение
-                if ('timestamp' in cachedEntryData) {
-                    const newTimestamp = (
-                        item as unknown as { timestamp: number }
-                    ).timestamp
-                    const cachedTimestamp = (
-                        cachedEntryData as { timestamp: number }
-                    ).timestamp
-
-                    // Обновляем кэш только если новый timestamp больше или равен старому
-                    if (newTimestamp >= cachedTimestamp) {
-                        this.#cache.set(cacheKey, {
-                            data: item,
-                            lastAccess: now,
-                            collectionName,
-                        })
-                        logTest(
-                            logForTest,
-                            'update cache item - timestamp checked',
-                            item,
-                        )
-                    }
-                } else {
-                    // Если поля timestamp нет, обновляем как обычно
-                    this.#cache.set(cacheKey, {
-                        data: item,
-                        lastAccess: now,
-                        collectionName,
-                    })
-                    logTest(
-                        logForTest,
-                        'update cache item - no timestamp',
-                        item,
-                    )
-                }
-                return
-            }
-        }
-
-        // Если кэш полон, ищем записи для вытеснения
-        if (this.#cache?.size || 0 >= this.#cacheSize) {
-            let oldestAccess = Infinity
-            let oldestKey: string | undefined
-
-            // Find the entry with the oldest access time
-            for (const [key, entry] of this.#cache.entries()) {
-                if (entry.collectionName !== collectionName) {
-                    continue
-                }
-                // Проверяем TTL при поиске самой старой записи
-                if (this.#cacheTTL && now - entry.lastAccess > this.#cacheTTL) {
-                    // Запись устарела, удаляем её
-                    this.#cache.delete(key)
-                    logTest(
-                        logForTest,
-                        `Cache entry in collection ${collectionName} expired during eviction for ${key}`,
-                    )
-                    continue
-                }
-
-                if (entry.lastAccess < oldestAccess) {
-                    oldestAccess = entry.lastAccess
-                    oldestKey = key
-                }
-            }
-
-            // logTest(logForTest,'cache eviction - oldestKey', oldestKey)
-
-            // Remove the oldest entry
-            if (oldestKey !== undefined) {
-                this.#cache?.delete(oldestKey)
-            }
-            // add new entry to cache
-            logTest(logForTest, 'cache eviction - add new entry to cache', item)
-            this.#cache?.set(cacheKey, {
-                data: item,
-                lastAccess: now,
-                collectionName,
-            })
-            return
-        }
-
-        // logTest(logForTest,'cache is not full - add new entry to cache', item)
-        this.#cache?.set(cacheKey, {
-            data: item,
-            lastAccess: now,
-            collectionName,
-        })
-    }
-
-    #matchesData<T extends LineDbAdapter>(
-        item: T,
-        data: Partial<T>,
-        strictCompare?: boolean,
-    ): boolean {
-        return Object.entries(data).every(([key, value]) => {
-            const itemValue = item[key as keyof T]
-
-            if (
-                typeof value === 'string' &&
-                typeof itemValue === 'string' &&
-                !strictCompare
-            ) {
-                return itemValue.toLowerCase().includes(value.toLowerCase())
-            }
-
-            return itemValue === value
-        })
     }
 
     selectResultArray<T>(result: CollectionChain<T> | T[]): T[] {
@@ -1502,7 +1499,7 @@ export class LineDb {
                     const cached = (
                         this.#cacheExternal
                             ? this.#cacheExternal.get(cacheKey)
-                            : (this.#cache?.get(cacheKey) as CacheEntry<T>)
+                            : null
                     ) as T | null
                     results = cached
                         ? [cached]
@@ -1696,30 +1693,6 @@ export class LineDb {
         return chain(result)
     }
 
-    /**
-     * Performs a transaction with multiple adapters simultaneously.
-     *
-     * @template T - Type of adapter data
-     * @param callback - Callback function that will be executed within the transaction
-     * @param adapters - Map of adapters with which the transaction will be performed
-     * @param lineDbTransactionOptions - Transaction options
-     * @param lineDbTransactionOptions.rollback - Flag indicating whether to perform a rollback transaction in case of an error (default true)
-     * @param lineDbTransactionOptions.timeout - Transaction timeout in milliseconds (default 10000)
-     * @returns Promise<void>
-     *
-     * @example
-     * ```typescript
-     * const adapters = new Map();
-     * adapters.set('collection1', adapter1);
-     * adapters.set('collection2', adapter2);
-     *
-     * await db.withMultyAdaptersTransaction(async (adaptersMap, db) => {
-     *
-     *   await adaptersMap.get('collection1').adapter.write(data1);
-     *   await adaptersMap.get('collection2').adapter.write(data2);
-     * }, adapters);
-     * ```
-     */
     async withMultyAdaptersTransaction(
         callback: (
             adapters: Map<
@@ -1753,26 +1726,16 @@ export class LineDb {
                 )
             this.#inTransaction = true
             try {
+                // Собираем все адаптеры
                 for (const collectionName of adapters) {
-                    // get existing adapters for this collection
                     const existingAdapters =
                         await this.getCollectionAdapters(collectionName)
                     for (const [adapterKey, adapter] of existingAdapters) {
-                        // if adapter is not in adapterMap, begin transaction add it
                         if (!adapterMap.has(adapterKey)) {
-                            const adapterTransactionId =
-                                await adapter.beginTransaction({
-                                    rollback:
-                                        !lineDbTransactionOptions.rollback,
-                                    timeout:
-                                        lineDbTransactionOptions.timeout ||
-                                        10_000,
-                                })
                             adapterMap.set(adapterKey, {
                                 adapter,
                                 adapterOptions: {
                                     inTransaction: true,
-                                    transactionId: adapterTransactionId,
                                 },
                             })
                         }
@@ -1782,19 +1745,63 @@ export class LineDb {
                 if (lineDbTransactionOptions.rollback) {
                     await this.createBackup(transactionBackupFile, {
                         collectionNames: Array.from(adapterMap.keys()),
-                        noLock: true, // we aleady locked db
+                        noLock: true,
+                        exectlyInclude: true,
                     })
                 }
-                await callback(adapterMap, this)
+
+                // Создаем массив адаптеров для вложенных транзакций
+                const adapterArray = Array.from(adapterMap.values())
+
+                // Создаем вложенные транзакции вручную
+                let currentPromise:
+                    | Promise<unknown>
+                    | (() => Promise<unknown>) = async () => {
+                    return await callback(adapterMap, this)
+                }
+
+                // Проходим по адаптерам в обратном порядке и оборачиваем в транзакции
+                for (let i = adapterArray.length - 1; i >= 0; i--) {
+                    const adapterInfo = adapterArray[i]
+                    const previousPromise = currentPromise
+
+                    currentPromise = adapterInfo.adapter.withTransaction(
+                        async (adapter) => {
+                            // Обновляем adapterMap с транзакционным адаптером
+                            const updatedAdapterMap = new Map(adapterMap)
+                            updatedAdapterMap.set(adapter.getCollectionName(), {
+                                adapter,
+                                adapterOptions: {
+                                    inTransaction: true,
+                                },
+                            })
+
+                            // Вызываем предыдущий слой (callback или следующий адаптер)
+                            return typeof previousPromise === 'function'
+                                ? await previousPromise()
+                                : await previousPromise
+                        },
+                        {
+                            rollback:
+                                lineDbTransactionOptions.rollback !== false,
+                            timeout: lineDbTransactionOptions.timeout || 10_000,
+                        },
+                        {
+                            inTransaction: true,
+                        },
+                    )
+                }
+
+                // Ждем выполнения всей цепочки
+                await currentPromise
             } catch (error) {
                 if (lineDbTransactionOptions.rollback) {
-                    await this.restoreFromBackup(transactionBackupFile)
+                    await this.restoreFromBackup(transactionBackupFile, {
+                        noLock: true,
+                    })
                 }
                 throw error
             } finally {
-                for (const [, adapter] of adapterMap) {
-                    await adapter.adapter.endTransaction()
-                }
                 this.#inTransaction = false
             }
         })
@@ -1817,16 +1824,12 @@ export class LineDb {
         const closure = async (adapter: JSONLFile<T>) => {
             return await callback(adapter, this)
         }
-        try {
-            const transactionId =
-                await adapter.beginTransaction(transactionOptions)
-            return await adapter.withTransaction(closure, {
-                ...adapterOptions,
-                transactionId,
-            })
-        } finally {
-            await adapter.endTransaction()
-        }
+
+        return await adapter.withTransaction(
+            closure,
+            transactionOptions,
+            adapterOptions,
+        )
     }
 
     async createBackup(
@@ -1836,10 +1839,11 @@ export class LineDb {
             gzip?: boolean
             encryptKey?: string
             noLock?: boolean
+            exectlyInclude?: boolean // if true, only include collectionNames in collectionNames parameter, if false, include all partitions in db
         } = {
             noLock: false,
         },
-    ): Promise<void> {
+    ): Promise<string> {
         if (!outputFile) {
             const backupFolder = path.join(process.cwd(), 'linedb-backups')
             if (!fsClassic.existsSync(backupFolder)) {
@@ -1865,7 +1869,11 @@ export class LineDb {
             for (const [collectionName, adapter] of this.#adapters) {
                 const baseCollectionName = collectionName.split('_')[0]
                 // passthrough if collection is not in parameter collectionNames - compare by base collection name
-                if (
+                if (options?.exectlyInclude) {
+                    if (!options.collectionNames?.includes(collectionName)) {
+                        continue
+                    }
+                } else if (
                     options.collectionNames &&
                     !options.collectionNames.includes(baseCollectionName)
                 ) {
@@ -1884,22 +1892,7 @@ export class LineDb {
                 // Добавляем данные коллекции
                 for (const item of data) {
                     const itemToPush = JSON.stringify(item)
-                    // if (options.gzip) {
-                    //     itemToPush = (
-                    //         await gzipAsync(Buffer.from(itemToPush))
-                    //     ).toString('base64')
-                    // }
-                    // if (options.encryptKey) {
-                    //     const encryptedItem = await this.#encrypt(
-                    //         itemToPush,
-                    //         options.encryptKey,
-                    //     )
-                    //     if (typeof encryptedItem === 'string') {
-                    //         itemToPush = encryptedItem
-                    //     } else {
-                    //         throw new Error(encryptedItem.error)
-                    //     }
-                    // }
+
                     backupContent.push(itemToPush)
                 }
 
@@ -1944,6 +1937,7 @@ export class LineDb {
         } else {
             await mutexLocal.withReadLock(payload)
         }
+        return outputFile
     }
 
     async restoreFromBackup(
@@ -1962,7 +1956,7 @@ export class LineDb {
             noLock: false,
         },
     ): Promise<{ error: string } | void> {
-        const mutexLocal = this.#mutex || globalLineDbMutex
+        const mutexLocal = globalLineDbMutex
         // Считываем метаданные из первой строки файла бэкапа
         let metaData: BackupMetaData = {
             collectionNames: [],
@@ -2092,7 +2086,9 @@ export class LineDb {
                         )
 
                         // Clear cache for this collection
-                        await this.clearCache(currentCollection)
+                        await this.clearCache(currentCollection, {
+                            inTransaction: true,
+                        })
                         currentData = []
                     }
 
@@ -2150,7 +2146,9 @@ export class LineDb {
             // await adapter.init(true)
 
             // Очищаем кэш для этой коллекции
-            await this.clearCache(currentCollection)
+            await this.clearCache(currentCollection, {
+                inTransaction: true,
+            })
         }
         // execute payload
         try {
@@ -2241,6 +2239,125 @@ export class LineDb {
         }
 
         return partitionAdapter
+    }
+
+    async selectWithPagination<T extends LineDbAdapter>(
+        filter: Partial<T> | string,
+        page: number = 1,
+        limit: number = 20,
+        collectionName?: string,
+        options: {
+            strictCompare?: boolean
+            inTransaction?: boolean
+            optimisticRead?: boolean
+        } = {},
+    ): Promise<PaginatedResult<T>> {
+        if (!collectionName) {
+            collectionName = this.firstCollection
+        }
+
+        // Создаем уникальный ключ кэша
+        const cacheKey = await this.#getPaginationCacheKey(
+            filter,
+            collectionName,
+        )
+
+        // Проверяем кэш
+        let all: T[] = []
+        if (this.#cacheExternal?.has(cacheKey)) {
+            const cached = this.#cacheExternal.get(cacheKey)
+            if (cached) {
+                logTest(logForTest, `Cache hit for pagination: ${cacheKey}`)
+                all = cached as T[]
+            }
+        }
+
+        // Если нет в кэше, получаем все данные
+        if (all.length === 0) {
+            const allSelectResult = await this.select<T>(
+                filter,
+                collectionName,
+                {
+                    ...options,
+                    returnChain: false,
+                },
+            )
+            const allUnsorted = this.selectResultArray(allSelectResult)
+            // sorted results
+            all = allUnsorted.sort((a, b) => {
+                if (
+                    a.id &&
+                    b.id &&
+                    typeof a.id === 'number' &&
+                    typeof b.id === 'number'
+                ) {
+                    return a.id - b.id
+                }
+                if (
+                    a.id &&
+                    b.id &&
+                    typeof a.id === 'string' &&
+                    typeof b.id === 'string'
+                ) {
+                    return a.id.localeCompare(b.id)
+                }
+                if (
+                    a.id &&
+                    b.id &&
+                    typeof a.id === 'number' &&
+                    typeof b.id === 'string' &&
+                    !isNaN(parseInt(b.id))
+                ) {
+                    return a.id - parseInt(b.id)
+                }
+                if (
+                    a.id &&
+                    b.id &&
+                    typeof a.id === 'string' &&
+                    typeof b.id === 'number' &&
+                    !isNaN(parseInt(a.id))
+                ) {
+                    return parseInt(a.id) - b.id
+                }
+                return a.id.toString().localeCompare(b.id.toString())
+            })
+
+            // Сохраняем все данные в кэш
+            if (this.#cacheExternal) {
+                this.#cacheExternal.set(cacheKey, all)
+                logTest(logForTest, `Cache set for pagination: ${cacheKey}`)
+            }
+        }
+
+        const total = all.length
+        const pages = Math.ceil(total / limit)
+        const start = (page - 1) * limit
+        const end = start + limit
+        const data = all.slice(start, end)
+
+        const result: PaginatedResult<T> = {
+            data,
+            total,
+            limit,
+            pages,
+            page,
+        }
+
+        return result
+    }
+
+    /**
+     * Create unique cache key for pagination
+     */
+    async #getPaginationCacheKey<T extends LineDbAdapter>(
+        filter: Partial<T> | string,
+        collectionName: string,
+    ): Promise<string> {
+        const filterStr =
+            typeof filter === 'string' ? filter : JSON.stringify(filter)
+        return `pagination:${collectionName}:${await compressToBase64(
+            filterStr,
+        )}`
     }
 }
 

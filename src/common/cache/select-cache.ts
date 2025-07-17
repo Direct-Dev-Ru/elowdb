@@ -84,7 +84,7 @@ export class SelectCache<T extends { id: string | number }>
                 this.cacheLimit
         }
         if (canSetCache) {
-        this.cache.set(key, { data, total, timestamp: Date.now() })
+            this.cache.set(key, { data, total, timestamp: Date.now() })
         }
         return canSetCache
     }

@@ -20,6 +20,8 @@ export { YAMLFile } from './adapters/node/YAMLFile.js'
 export { YAMLFileSync } from './adapters/node/YAMLFile.js'
 
 // Browser adapters
+export { CookieStorage } from './adapters/browser/CookieStorage.js'
+export { IndexedDbStorage } from './adapters/browser/IndexedDbStorage.js'
 export { LocalStorage } from './adapters/browser/LocalStorage.js'
 export { SessionStorage } from './adapters/browser/SessionStorage.js'
 

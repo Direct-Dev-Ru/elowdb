@@ -1,13 +1,14 @@
 import { RWMutex } from '@direct-dev-ru/rwmutex-ts'
 
-import { JSONLFileOptions, LineDbAdapter } from './jsonl-file.js'
 import { RecordCache } from './cache.js'
+import { JSONLFileOptions, LineDbAdapter } from './jsonl-file.js'
 
 export { LineDbAdapter } from './jsonl-file.js'
 
 export interface PartitionCollection<P> {
     collectionName: string
     partIdFn: ((item: Partial<P>) => string) | string
+    mutex?: RWMutex
 }
 
 export interface nextIdCollection<P> {

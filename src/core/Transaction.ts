@@ -25,7 +25,7 @@ export class JSONLTransaction implements ITransaction {
         } = {
             mode: 'write',
             id: crypto.randomUUID(),
-            timeout: 10000,
+            timeout: 10_000,
             rollback: false,
             backupFile: '',
             doNotDeleteBackupFile: false,
